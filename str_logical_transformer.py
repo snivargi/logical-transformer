@@ -739,10 +739,17 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
                 if match.group(6) == '(': #Expression/operand is in brackets
                     part_expr = get_expr_within_brackets(part)
                     part = part[part.find(part_expr)+len(part_expr)+1:] #Remaining part should be anything after the closing bracket of the first bracketed expression
-                    loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets; if this is a 'not' expr, it'll be handled below
-                    #----Handle NOT-----------
-                    if 'not' in cond:
-                        loper = merge_not(loper, level, block)      
+                    if (re.search(r'\b(and|or|not)\b', part_expr)): #Check if expression needs to be broken down further 
+                        loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets; if this is a 'not' expr, it'll be handled below
+                        #----Handle NOT-----------
+                        if 'not' in cond:
+                            loper = merge_not(loper, level, block)      
+                    else:
+                        if 'not' in cond:
+                            cond = replace_not(cond)
+                            loper.append (f'{cond}bool({part_expr}):')
+                        else:
+                            loper.append (f'{cond} {part_expr}:')                       
                 else: #Expression not within brackets, needs to become code                                 
                     part_expr = match.group(7).strip() #This is the first expression and will become the left operand                
                     part = part[part.find(part_expr)+len(part_expr):] #Remaining part is the part after the first expression
