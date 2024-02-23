@@ -61,8 +61,10 @@ if  found is True:
 
 block_num = 0
 code1= """
-if  " False " or False:
-    print ("True")
+if  not (1 or True) and not(False or 0):
+    print (True)  
+else:
+    print (False) 
 #===========AND========================================
 print(True and True)
 #True
@@ -709,7 +711,7 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
                 #Short-circuiting logic
                 if oper == 'and' and not left:
                     part='' ##We have found the first False condition with an AND. This is the result.  No need to evaluate the rest of the expression
-                elif oper == 'or' and ((left and not isinstance(left,str)) or re.match(r'''(['"])[^\1]+\1$''', left)):
+                elif oper == 'or' and ((left and not isinstance(left,str)) or (isinstance(left,str) and re.match(r'''(['"])[^\1]+\1$''', left))):
                     part = '' #We have found the first True condition with an OR. This is the result.  No need to evaluate the rest of the expression
                 else:
                     part = part[match.end(0):] #Entire expression after the first operator
