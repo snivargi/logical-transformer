@@ -15,11 +15,11 @@ class Parentage(ast.NodeTransformer):
 
 class Transformer(Parentage):
     
-    def visit_Module(self, node: ast.Module) -> Any:        
-        print(f'entering {node.__class__.__name__}')
-        print(f'parent node {node.parent.__class__.__name__}')
-        node.body = self.process_stmt_list(node.body)    
-        return node    
+    # def visit_Module(self, node: ast.Module) -> Any:        
+    #     print(f'entering {node.__class__.__name__}')
+    #     print(f'parent node {node.parent.__class__.__name__}')
+    #     node.body = self.process_stmt_list(node.body)    
+    #     return node    
 
     def visit_If(self, node: ast.If) -> Any:
         return_list = []
@@ -47,10 +47,9 @@ class Transformer(Parentage):
 
     def get_Assign(self, node_Name_id, node_Name_ctx, bool_val = False):
 
-        node_Name = self.get_Name(node_Name_id, node_Name_ctx)                        
-        assign_targets = [node_Name]
+        node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
         node_Assign = ast.Assign(
-                targets=assign_targets,
+                targets=[node_Name],
                 value=ast.Constant(value=bool_val)
         )
         return node_Assign
@@ -80,6 +79,27 @@ class Transformer(Parentage):
                         ctx = name_ctx
         )
         return node_Name
+    
+    def get_Call(self, node_Name_id, node_Name_ctx, node_Call_arg):
+
+        node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
+        node_Call = ast.Call(
+                func=node_Name,
+                args=[node_Call_arg],
+                keywords=[]
+        )
+        return node_Call
+    
+    def merge_Not(self, lroper: list, if_block_var_id):        
+        processed_list = []
+        last_if: ast.If = lroper.pop()
+        last_if.body = ast.Pass()
+        lroper.append(last_if)
+        processed_list =  self.merge_Or(lroper, [], if_block_var_id)
+        # lroper.append(f'{spacing}    pass') #If the condition is True, do nothing (pass)
+        # lroper = merge_or(lroper, [], level, block) #Add provision to execute where condition is False
+        return processed_list 
+
 
     def merge_And(self, loper: list, roper: list):
 
@@ -117,6 +137,20 @@ class Transformer(Parentage):
                     node_If_list = self.merge_Or(node_If_list, new_Ifs, if_block_var_id)
                 elif isinstance(node_if_test.op, ast.And):
                     node_If_list = self.merge_And(node_If_list, new_Ifs)
+        elif isinstance(node_if_test, ast.UnaryOp) and isinstance(node_if_test.op, ast.Not): #unary boolean                                    
+            if isinstance(node_if_test.operand, ast.BoolOp): #Negation of bracketed boolean expressions more complex than initially anticipated   
+                #ToDo: Break down the BoolOps and then merge with additional 'not' statements
+                ...#node_If_list = self.merge_Not(new_Ifs, if_block_var_id)                    
+                
+                #Keep the expression as-is for now        
+                node_if = self.get_If(node_if_test, [])  
+                node_If_list.append(node_if)        
+            else:
+                new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)        
+                last_if: ast.If = new_Ifs[-1] 
+                node_ifnot_test = self.get_Compare(ast.Constant(value = False), ast.Eq(), self.get_Call('bool', ast.Load(), last_if.test))
+                last_if.test = node_ifnot_test
+                node_If_list.append(last_if)
         else:
             node_if = self.get_If(node_if_test, [])
             node_If_list.append(node_if)
@@ -124,8 +158,7 @@ class Transformer(Parentage):
         return node_If_list
 
     def process_stmt_list(self, stmt_list):
-        processed_list = []
-        #gen = ast.iter_child_nodes(stmt_list)
+        processed_list = []        
         gen = iter(stmt_list) #Use a generator in case the tree is large
         while True:
             try:
@@ -175,10 +208,8 @@ class Transformer(Parentage):
         return processed_if
 
 code = '''
-if  1 or "False" and True:
-    print (True)    
-else:    
-    print (False)
+if  not ("False") and not (not True):
+    print (True)  
 '''
 code1 = '''
 if  1 or "False" and True:
@@ -189,7 +220,7 @@ else:
     print (False)
 '''
 
-tree = ast.parse(code1)
+tree = ast.parse(code)
 print(ast.dump(tree, indent='   '))
 
 new_tree = Transformer().visit(tree)
