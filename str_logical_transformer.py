@@ -61,7 +61,7 @@ if  found is True:
 
 block_num = 0
 code1= """
-if  not (1 or True) and not(False or 0):
+if  not ("False") and not (not True):    
     print (True)  
 else:
     print (False) 
@@ -742,10 +742,14 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
                     part = part[part.find(part_expr)+len(part_expr)+1:] #Remaining part should be anything after the closing bracket of the first bracketed expression
                     if (re.search(r'\b(and|or|not)\b', part_expr)): #Check if expression needs to be broken down further                         
                         #----Handle NOT-----------
-                        if 'not' in cond: #Negation of bracketed boolean expressions more complex than initially anticipated                            
-                            ... #loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True) #Parse expression without 'not' first
-                            ... #loper = merge_not(loper, level, block) #Then attempt to merge with additional 'not' statements
-                            loper.append (f'{cond} ({part_expr}):')  #Keep the expression as-is for now                     
+                        if 'not' in cond:
+                            if (re.search(r'\b(and|or)\b', part_expr)): #Negation of bracketed boolean expressions more complex than initially anticipated                            
+                                ... #loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True) #Parse expression without 'not' first
+                                ... #loper = merge_not(loper, level, block) #Then attempt to merge with additional 'not' statements
+                                loper.append (f'{cond} ({part_expr}):')  #Keep the expression as-is for now                     
+                            else:
+                                loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets                                                                
+                                loper[-1] = re.sub('^if\s+','if False == bool(', loper[-1].replace(':','')) + '):'                                
                         else: 
                             loper = parse_expr (part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets
                     else:

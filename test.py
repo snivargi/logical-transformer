@@ -1,7 +1,10 @@
 bool_IF_result0 = False
-if " False ":
-    bool_IF_result0 = True
-    print ("True")
+if  False == bool("False"):
+    if False == bool(False == bool(True)):
+        bool_IF_result0 = True
+        print (True)  
+if bool_IF_result0 is False:
+    print (False) 
 print (True)
 print (0)
 bool_IF_result0 = False
