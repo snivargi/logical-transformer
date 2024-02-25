@@ -152,7 +152,7 @@ if not (True==False) and not (0 == 1):
     print ('True is not False')
     if 0 and False:
         print ("Something's wrong!")
-#Hello, world!
+#True is not False
 
 if not  True==False :
     print ('True!=False')
@@ -520,10 +520,11 @@ def merge_not(lroper, level, block):
     '''
     Wrap an operand within the  NOT operator
     '''
-    match = re.search('^\s*', lroper[-1])  #find the first "word" in the last line         
-    if match:
-        spacing = match.group()        
-    lroper.append(f'{spacing}    pass') #If the condition is True, do nothing (pass)
+    # match = re.search('^\s*', lroper[-1])  #find the first "word" in the last line         
+    # if match:
+    #     spacing = match.group()        
+    # lroper.append(f'{spacing}    pass') #If the condition is True, do nothing (pass)
+    lroper = merge_and(lroper, ['pass'], 0, 0)
     lroper = merge_or(lroper, [], level, block) #Add provision to execute where condition is False
     return lroper
 
@@ -702,9 +703,7 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
             if if_expr and match: #Get the right operand and process an 'if/elif' expression
                 oper = match.group(1).strip() #operator
                 
-                #Check if we have a result already so we can short-circuit the expression                                
-                # left = (re.sub('^(el)?if', '', loper[0])) #Replace the 'if/elif' keywords
-                # left = left.replace(':','')  #Replace any trailing ':'
+                #Check if we have a result already so we can short-circuit the expression                                                
                 match_expr = re.match('if(.+):', loper[0])
                 left = match_expr.group(1) #operator
                 left = get_typed_val(left) #Get the left operand in its primitive datatype               
@@ -741,11 +740,14 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
                 if match.group(6) == '(': #Expression/operand is in brackets
                     part_expr = get_expr_within_brackets(part)
                     part = part[part.find(part_expr)+len(part_expr)+1:] #Remaining part should be anything after the closing bracket of the first bracketed expression
-                    if (re.search(r'\b(and|or|not)\b', part_expr)): #Check if expression needs to be broken down further 
-                        loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets; if this is a 'not' expr, it'll be handled below
+                    if (re.search(r'\b(and|or|not)\b', part_expr)): #Check if expression needs to be broken down further                         
                         #----Handle NOT-----------
-                        if 'not' in cond:
-                            loper = merge_not(loper, level, block)      
+                        if 'not' in cond: #Negation of bracketed boolean expressions more complex than initially anticipated                            
+                            ... #loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True) #Parse expression without 'not' first
+                            ... #loper = merge_not(loper, level, block) #Then attempt to merge with additional 'not' statements
+                            loper.append (f'{cond} ({part_expr}):')  #Keep the expression as-is for now                     
+                        else: 
+                            loper = parse_expr (part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets
                     else:
                         if 'not' in cond:
                             cond = replace_not(cond)
