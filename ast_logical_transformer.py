@@ -1,5 +1,6 @@
 import ast
 from typing import Any
+from collections import deque
 
 class Parentage(ast.NodeTransformer):
     parent = None
@@ -18,7 +19,7 @@ class Transformer(Parentage):
     # def visit_Module(self, node: ast.Module) -> Any:        
     #     print(f'entering {node.__class__.__name__}')
     #     print(f'parent node {node.parent.__class__.__name__}')
-    #     node.body = self.process_stmt_list(node.body)    
+    #     node.body = self.process_stmt_list((stmt for stmt in node.body))    
     #     return node    
 
     def visit_If(self, node: ast.If) -> Any:
@@ -41,6 +42,7 @@ class Transformer(Parentage):
         #return_list.append(processed_if_list) #Doesn't work as intended - adds if_list as a nested list
         #return_list= [node_assign_if] + self.process_If (node) #Works
         return_list.extend(processed_if_list) #Works
+        
         
         
         return  return_list
@@ -119,8 +121,7 @@ class Transformer(Parentage):
     def merge_Or(self, loper: list, roper: list, if_block_var_id):
 
         node_if: ast.If
-        if loper:
-            #temp_var_id = f'_boolIf{col_offset}'
+        if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
             node_if_test = self.get_Compare(node_temp_var_name, ast.Is(), ast.Constant(value = False))
             node_if = self.get_If(node_if_test, roper)
@@ -157,9 +158,9 @@ class Transformer(Parentage):
 
         return node_If_list
 
-    def process_stmt_list(self, stmt_list):
-        processed_list = []        
-        gen = iter(stmt_list) #Use a generator in case the tree is large
+    def process_stmt_list(self, gen):
+        processed_list = deque([])        
+        #gen = iter(stmt_list) #Use a generator in case the tree is large
         while True:
             try:
                 stmt= next(gen)
@@ -185,14 +186,17 @@ class Transformer(Parentage):
             print(f'body has node: {body_node.__class__.__name__}')
             if isinstance(body_node, ast.If): #We need to start breaking up the 'body' into individual IFs
                 pass
-        processed_body = self.process_stmt_list(body)        
+               
+        #processed_body = self.process_stmt_list(body)        
+        processed_body = self.process_stmt_list((stmt for stmt in body))        
         node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), True) 
-        processed_body.insert(0, node_assign_if)
+        #processed_body.insert(0, node_assign_if)       
+        processed_body.appendleft(node_assign_if)       
 
         #Process test
         test = node.test
         new_ifs = self.get_Ifs_AndOr(test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
-        processed_if = self.merge_And(new_ifs, processed_body) #Add the body to the new Ifs we got from breaking down the test
+        processed_if = self.merge_And(new_ifs, list(processed_body)) #Add the body to the new Ifs we got from breaking down the test
 
         #Process orelse
         orelse = node.orelse
@@ -200,16 +204,19 @@ class Transformer(Parentage):
             print(f'orelse has node: {orelse_node.__class__.__name__}')
             if isinstance(orelse_node, ast.If): #We need to start breaking up the 'orelse' into individual IFs
                 pass
-        processed_orelse = self.process_stmt_list(orelse)       
+        #processed_orelse = self.process_stmt_list(orelse)       
+        processed_orelse = self.process_stmt_list((stmt for stmt in orelse))            
         if processed_orelse:     
-            processed_if = self.merge_Or(processed_if, processed_orelse, if_block_var_id)
+            processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
 
 
         return processed_if
 
 code = '''
 if  not ("False") and not (not True):
-    print (True)  
+    print (True)
+else:    
+    print (False)      
 '''
 code1 = '''
 if  1 or "False" and True:
