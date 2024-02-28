@@ -962,8 +962,8 @@ def main():
     #exec (new_code)
 
     #Write new code to file
-    with open('test.py', 'w') as f:
-         f.write(new_code)  
+    with open('str_transformed_code.py', 'w') as f:
+        f.write(new_code)  
     
 if __name__ == '__main__':
     set_oper_dict() #Create the dictionary of operators and their precedence dynamically from a tuple of operators

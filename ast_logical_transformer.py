@@ -159,53 +159,49 @@ class Transformer(Parentage):
         return node_If_list
 
     def process_stmt_list(self, gen):
-        processed_list = deque([])        
-        #gen = iter(stmt_list) #Use a generator in case the tree is large
+        processed_list = deque([])                
         while True:
             try:
                 stmt= next(gen)
             except StopIteration:
                 break
-            print(f'Iterator yielded {stmt.__class__.__name__}')
+            print(f'Generator yielded {stmt.__class__.__name__}')
             if  isinstance(stmt, ast.If):
                 if_block_var_id = f'_boolIf{stmt.col_offset}'
-                node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) #self.get_Assign(node_name_if, False)
+                node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) 
                 processed_list.append(node_assign_if) #Initialise the bool variable for this IF node
                 processed_if = self.process_If (stmt, if_block_var_id)
                 processed_list.extend(processed_if)    
             else:
                 processed_list.append(stmt) 
-        return  processed_list         
+        return  processed_list 
+
+    def field_generator(self, node, field):
+
+        for (fieldname, value) in ast.iter_fields(node):
+            if fieldname == field:
+                for stmt in value:
+                    yield stmt        
 
     def process_If(self, node: ast.If, if_block_var_id):
         processed_if = []
-        
-        #Process body
-        body = node.body        
-        for body_node in body:
-            print(f'body has node: {body_node.__class__.__name__}')
-            if isinstance(body_node, ast.If): #We need to start breaking up the 'body' into individual IFs
-                pass
                
-        #processed_body = self.process_stmt_list(body)        
-        processed_body = self.process_stmt_list((stmt for stmt in body))        
+        #processed_body = self.process_stmt_list(node.body)        
+        #processed_body = self.process_stmt_list((stmt for stmt in node.body))        
+        processed_body = self.process_stmt_list(self.field_generator(node, 'body'))
         node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), True) 
-        #processed_body.insert(0, node_assign_if)       
-        processed_body.appendleft(node_assign_if)       
+        #processed_body.insert(0, node_assign_if)  #Prepend to list     
+        processed_body.appendleft(node_assign_if)  #Prepend to deque     
 
         #Process test
         test = node.test
         new_ifs = self.get_Ifs_AndOr(test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
         processed_if = self.merge_And(new_ifs, list(processed_body)) #Add the body to the new Ifs we got from breaking down the test
 
-        #Process orelse
-        orelse = node.orelse
-        for orelse_node in orelse:
-            print(f'orelse has node: {orelse_node.__class__.__name__}')
-            if isinstance(orelse_node, ast.If): #We need to start breaking up the 'orelse' into individual IFs
-                pass
-        #processed_orelse = self.process_stmt_list(orelse)       
-        processed_orelse = self.process_stmt_list((stmt for stmt in orelse))            
+        #Process orelse       
+        #processed_orelse = self.process_stmt_list(node.orelse)       
+        #processed_orelse = self.process_stmt_list((stmt for stmt in node.orelse))            
+        processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
         if processed_orelse:     
             processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
 
@@ -219,18 +215,29 @@ else:
     print (False)      
 '''
 code1 = '''
-if  1 or "False" and True:
+if  0 or "False" and True:
     print (True)
     if isinstance('T', str):
-        print ('Inner if test')
+        print ('Inner if test executed')
 else:    
     print (False)
 '''
 
-tree = ast.parse(code)
+tree = ast.parse(code1)
 print(ast.dump(tree, indent='   '))
 
 new_tree = Transformer().visit(tree)
 new_tree = ast.fix_missing_locations(new_tree)
 print(ast.dump(new_tree, indent='   '))
-print(ast.unparse(new_tree))
+
+#View new code
+new_code = ast.unparse(new_tree)
+print(new_code)
+
+#Write new code to file
+with open('ast_transformed_code.py', 'w') as f:
+        f.write(new_code)  
+
+#Compile and Execute new code        
+# code_object = compile(new_tree, '', 'exec')
+# exec(code_object)
