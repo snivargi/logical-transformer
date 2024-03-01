@@ -37,6 +37,9 @@ class Transformer(Parentage):
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
 
+        if not (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)):
+            return node
+
         if_block_var_id = f'_boolIf{node.col_offset}'
         node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) 
         return_list.append(node_assign_if) #Initialise the bool variable for this IF node
