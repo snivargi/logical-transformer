@@ -5,21 +5,22 @@ from collections import deque
 class Parentage(ast.NodeTransformer):
     parent = None
 
-    def visit(self, node):
+    def visit(self, node: ast.AST):
         node.parent = self.parent
         self.parent = node
-        node = super().visit(node)
-        if isinstance(node, ast.AST):
-            self.parent = node.parent
-        return node
+        transformed_node = super().visit(node)
+        if isinstance(transformed_node, ast.AST):
+            self.parent = transformed_node.parent
+        else:
+            print (f'Transformed node: {type(transformed_node)}')    
+        return transformed_node
 
 
 class Transformer(Parentage):
     
-    dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
-
     def __init__(self, short_circuiting_flag = True) -> None:
         self.short_circuiting = short_circuiting_flag 
+        self.dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
         super().__init__()
 
     # def visit_Module(self, node: ast.Module) -> Any:        
@@ -32,12 +33,12 @@ class Transformer(Parentage):
         return_list = []
         print(f'entering {node.__class__.__name__} at line: {node.lineno} and offset: {node.col_offset}')
         print(f'parent node {node.parent.__class__.__name__}')
-        #super().generic_visit(node)
-
+        
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
 
         if not (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)):
+            super().generic_visit(node)
             return node
 
         if_block_var_id = f'_boolIf{node.col_offset}'
@@ -162,7 +163,7 @@ class Transformer(Parentage):
             elif (not val):  #We have a value that's evaluated to False                    
                 self.dict_node_shortcct[node_if_test] = 'and'#A False value will short-circuit an AND
         except Exception as e:
-            print (e)    #Expression could not be evaluated at compile time (can only happen at run time)
+            print (f'Warn: {e}')    #Expression could not be evaluated at compile time (can only happen at run time)
         return  short_circuited 
 
 
@@ -215,7 +216,7 @@ class Transformer(Parentage):
                 stmt= next(gen)
             except StopIteration:
                 break
-            print(f'Generator yielded {stmt.__class__.__name__}')
+            #print(f'Generator yielded {stmt.__class__.__name__}')
             if  isinstance(stmt, ast.If):
                 if_block_var_id = f'_boolIf{stmt.col_offset}'
                 node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) 
@@ -274,6 +275,11 @@ if  "False" or 1 and True:
         print ('Inner if test executed')
 else:    
     print (False)
+
+if 1:
+    print (1)
+else:
+    print (0)    
 '''
 
 tree = ast.parse(code1)
