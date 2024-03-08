@@ -17,11 +17,24 @@ class Parentage(ast.NodeTransformer):
 
 
 class Transformer(Parentage):
-    
-    def __init__(self, short_circuiting_flag = True) -> None:
-        self.short_circuiting = short_circuiting_flag 
+    EXPAND = 'E'
+    COLLAPSE = 'C'
+    tmp_bool_accessed = False
+    def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
+        self.mode = mode
+        self.short_circuiting = short_circuiting_flag         
         self.dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
         super().__init__()
+
+    def generic_visit(self, node):
+        try:        
+            line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
+        except Exception:
+            line_info = ''
+        print(f'entering {node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}')              
+        super().generic_visit(node)
+        print(f'leaving {node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}')      
+        return node
 
     # def visit_Module(self, node: ast.Module) -> Any:        
     #     print(f'entering {node.__class__.__name__}')
@@ -30,29 +43,40 @@ class Transformer(Parentage):
     #     return node    
 
     def visit_If(self, node: ast.If) -> Any:
-        return_list = []
-        print(f'entering {node.__class__.__name__} at line: {node.lineno} and offset: {node.col_offset}')
-        print(f'parent node {node.parent.__class__.__name__}')
+        processed_if = []
+        line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'        
+        node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
+        print(f'entering {node_metadata}')  
         
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
 
-        if not (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)):
+        node_call = self.get_Call('print', ast.Load(), ast.Constant(value = '<Node deleted>'))                
+        node_expr = self.get_Expr(node_call)
+
+        if self.mode == self.EXPAND:            
+            processed_if = self.expand_if (node) #Break down this If node into its logical components
+            if not processed_if:
+                print (f'Entire sub-tree {node_metadata} pruned')
+                processed_if.append(node_expr)
+            return  processed_if    
+        elif self.mode == self.COLLAPSE:
+            new_node = self.collapse_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)
+            
+            #Return as a node
+            new_node.parent = p #Parent needs to be copied over from the node being replaced
+            return new_node
+        
+            #Return as a list
+            #processed_if.append (new_node) 
+            # if not processed_if:
+            #     print (f'Entire sub-tree {node_metadata} pruned')
+            #     processed_if.append(node_expr)
+            # return processed_if #This list will automatically become part of the 'Module'
+        else:    
             super().generic_visit(node)
             return node
-
-        if_block_var_id = f'_boolIf{node.col_offset}'
-        node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) 
-        return_list.append(node_assign_if) #Initialise the bool variable for this IF node
-
-        processed_if_list = self.process_If (node, if_block_var_id) #Break down this If node into its logical components
-
-        #Merge the 2 lists
-        #return_list.append(processed_if_list) #Doesn't work as intended - adds if_list as a nested list
-        #return_list= [node_assign_if] + self.process_If (node) #Works
-        return_list.extend(processed_if_list) #Works
         
-        return  return_list
 
     def get_Assign(self, node_Name_id, node_Name_ctx, bool_val = False):
 
@@ -89,6 +113,12 @@ class Transformer(Parentage):
         )
         return node_Name
     
+    def get_Expr(self, value):
+        node_Expr = ast.Expr(
+            value=value
+        )
+        return node_Expr
+    
     def get_Call(self, node_Name_id, node_Name_ctx, node_Call_arg):
 
         node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
@@ -98,6 +128,14 @@ class Transformer(Parentage):
             keywords=[]
         )
         return node_Call
+    
+    def get_BoolOp(self, boolop_op: ast, boolop_values: list):
+        
+        node_BoolOp = ast.BoolOp(
+            op=boolop_op,
+            values=boolop_values
+        )
+        return node_BoolOp
     
     def merge_Not(self, lroper: list, if_block_var_id):        
         processed_list = []
@@ -129,6 +167,7 @@ class Transformer(Parentage):
         if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
             node_if_test = self.get_Compare(node_temp_var_name, ast.Is(), ast.Constant(value = False))
+            self.tmp_bool_accessed = True
             node_if = self.get_If(node_if_test, roper)
             roper = [node_if]                
         return  loper + roper
@@ -217,13 +256,8 @@ class Transformer(Parentage):
             except StopIteration:
                 break
             #print(f'Generator yielded {stmt.__class__.__name__}')
-            if  isinstance(stmt, ast.If):
-                if_block_var_id = f'_boolIf{stmt.col_offset}'
-                node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), False) 
-                processed_list.append(node_assign_if) #Initialise the bool variable for this IF node
-                processed_if = self.process_If (stmt, if_block_var_id)
-                if not processed_if:
-                    processed_list.pop() #Remove the bool variable for this IF node if the entire sub-tree was pruned
+            if  isinstance(stmt, ast.If):                
+                processed_if = self.expand_if (stmt)                
                 processed_list.extend(processed_if)    
             else:
                 processed_list.append(stmt) 
@@ -236,20 +270,31 @@ class Transformer(Parentage):
                 for stmt in value:
                     yield stmt        
 
-    def process_If(self, node: ast.If, if_block_var_id):
+    
+
+    def expand_if(self, node: ast.If):
         processed_if = []
-               
+        split = False 
+        if_block_var_id = f'_boolIf{node.col_offset}'
+        if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
+            split = True #We will only split if the test has one of: and/or/not/elif/else
+            
+
         #processed_body = self.process_stmt_list(node.body) #Process using list       
         #processed_body = self.process_stmt_list((stmt for stmt in node.body))  #Process using in-line generator
         processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
         
-        #Process test and merge body               
-        new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
-        if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
-            node_assign_if = self.get_Assign(if_block_var_id, ast.Store(), True) 
-            #processed_body.insert(0, node_assign_if)  #Prepend to list     
-            processed_body.appendleft(node_assign_if)  #Prepend to deque     
-            processed_if = self.merge_And(new_ifs, list(processed_body)) #Add the body to the new Ifs we got from breaking down the test
+        if processed_body:
+            #Process test and merge body               
+            new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
+            if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
+                if split:
+                    node_assign_if_pre = self.get_Assign(if_block_var_id, ast.Store(), False) 
+                    processed_if.append(node_assign_if_pre) #Initialise the bool variable for this IF node    
+                    node_assign_if_post = self.get_Assign(if_block_var_id, ast.Store(), True) 
+                    #processed_body.insert(0, node_assign_if)  #Prepend to list     
+                    processed_body.appendleft(node_assign_if_post)  #Prepend to deque                 
+                processed_if.extend(self.merge_And(new_ifs, list(processed_body))) #Add the body to the new Ifs we got from breaking down the test
 
         #Process orelse       
         #processed_orelse = self.process_stmt_list(node.orelse)       
@@ -258,8 +303,26 @@ class Transformer(Parentage):
         if processed_orelse:     
             processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
 
-
         return processed_if
+    
+    def collapse_if(self, node: ast.If, operands: list = []):
+        ret_if:ast.If = None
+
+        # if self.short_circuiting and self.is_short_circuited(node.test) and self.dict_node_shortcct[node.test] == 'and':
+        #     #This node short-circuits an 'and'
+        #     return
+        
+        if len(node.body)==1 and isinstance(node.body[0], ast.If) and not node.orelse: #We have a nested 'and'
+            nested_if = node.body[0]        
+            operands.append(node.test)
+            ret_if = self.collapse_if(nested_if, operands)   
+        elif operands:            
+            operands.append(node.test)
+            test = self.get_BoolOp(ast.And(), operands)
+            ret_if = self.get_If(test, node.body, node.orelse)
+        else:            
+            ret_if = node
+        return ret_if    
 
 code = '''
 if  not ("False") and not (not True):
@@ -276,17 +339,23 @@ if  "False" or 1 and True:
 else:    
     print (False)
 
-if 1:
-    print (1)
+if 0:
+    print (False)
 else:
-    print (0)    
+    print (True)    
+
+if 1:
+    if 2:
+        if 0:
+            print ('And test executed')
+    
 '''
 
 tree = ast.parse(code1)
 print(ast.dump(tree, indent='   '))
 
 #We don't want to "short-circuit" 'if' statement tests having boolean ops
-#new_tree = Transformer(short_circuiting = False).visit(tree) 
+#new_tree = Transformer(mode='E', short_circuiting = False).visit(tree) 
 
 #By default, 'if' statements tests having boolean ops will be "short-circuited" where possible 
 #
@@ -295,7 +364,9 @@ print(ast.dump(tree, indent='   '))
 #
 #'if False and x' will prune this branch altogether
 #
-new_tree = Transformer().visit(tree) 
+#new_tree = Transformer().visit(tree) 
+new_tree = Transformer(mode='E').visit(tree) 
+#new_tree = Transformer(mode='C', , short_circuiting_flag = False).visit(tree) 
 new_tree = ast.fix_missing_locations(new_tree)
 print(ast.dump(new_tree, indent='   '))
 
