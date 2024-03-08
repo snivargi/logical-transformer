@@ -15,11 +15,22 @@ class Parentage(ast.NodeTransformer):
             print (f'Transformed node: {type(transformed_node)}')    
         return transformed_node
 
+class RemoveUnaccessed(ast.NodeTransformer):
+    def __init__(self, id) -> None:
+        self.node_Name_id = id
+        super().__init__()
 
+    def visit_Assign(self, node: ast.Assign) -> Any:
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and (target.id==self.node_Name_id):
+            return None #Remove this node
+        else:
+            return node
+        
 class Transformer(Parentage):
     EXPAND = 'E'
     COLLAPSE = 'C'
-    tmp_bool_accessed = False
+    tmp_bool_access = {} #Dict to track temp variable (for every 'if' block) access
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
         self.mode = mode
         self.short_circuiting = short_circuiting_flag         
@@ -167,7 +178,7 @@ class Transformer(Parentage):
         if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
             node_if_test = self.get_Compare(node_temp_var_name, ast.Is(), ast.Constant(value = False))
-            self.tmp_bool_accessed = True
+            self.tmp_bool_access[if_block_var_id] = True
             node_if = self.get_If(node_if_test, roper)
             roper = [node_if]                
         return  loper + roper
@@ -276,6 +287,8 @@ class Transformer(Parentage):
         processed_if = []
         split = False 
         if_block_var_id = f'_boolIf{node.col_offset}'
+        self.tmp_bool_access[if_block_var_id] = False    
+
         if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
             split = True #We will only split if the test has one of: and/or/not/elif/else
             
@@ -303,6 +316,12 @@ class Transformer(Parentage):
         if processed_orelse:     
             processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
 
+        if processed_if and isinstance(processed_if[0], ast.Assign) and not self.tmp_bool_access[if_block_var_id]:
+            processed_if.pop(0)
+            remover = RemoveUnaccessed(if_block_var_id)
+            clean_if = remover.visit(processed_if[0])
+            processed_if = [clean_if]
+        
         return processed_if
     
     def collapse_if(self, node: ast.If, operands: list = []):
