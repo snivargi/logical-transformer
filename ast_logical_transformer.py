@@ -216,8 +216,7 @@ class Transformer(Parentage):
         if isinstance(node_if_test, ast.BoolOp):           
             reduced_if_test = test = self.get_BoolOp(node_if_test.op, [])            
             for test in node_if_test.values: 
-                reduced_test = self.reduce_if_test(test)                               
-                #last_test: ast.AST = tests[-1] if tests else []
+                reduced_test = self.reduce_if_test(test)                                               
                 if isinstance(node_if_test.op, ast.Or):                                                             
                     if reduced_test: 
                         if reduced_test in self.dict_node_shortcct and self.dict_node_shortcct[reduced_test] == 'or': 
@@ -246,18 +245,9 @@ class Transformer(Parentage):
             for node in node_if_test.values:                
                 new_Ifs: list = self.get_Ifs_AndOr(node, if_block_var_id)
                 last_if: ast.If = new_Ifs[-1] if new_Ifs else []
-                if isinstance(node_if_test.op, ast.Or):                                        
-                    if self.short_circuiting and last_if and last_if.test in self.dict_node_shortcct and self.dict_node_shortcct[last_if.test] == 'or': 
-                        #We have found the first True condition with an OR. No need to evaluate the rest of the expression
-                        if not node_If_list: 
-                            node_If_list = self.merge_Or(node_If_list, new_Ifs, if_block_var_id) #If the return list is empty, add this condition first
-                        break
+                if isinstance(node_if_test.op, ast.Or):                                                           
                     node_If_list = self.merge_Or(node_If_list, new_Ifs, if_block_var_id)                    
-                elif isinstance(node_if_test.op, ast.And):                    
-                    if self.short_circuiting and not last_if:                        
-                        #We have found the first False condition with an AND. No need to evaluate the rest of the expression
-                        node_If_list = [] #None of the other 'and' conditions will get executed
-                        break
+                elif isinstance(node_if_test.op, ast.And):                                        
                     node_If_list = self.merge_And(node_If_list, new_Ifs)                    
         elif isinstance(node_if_test, ast.UnaryOp) and isinstance(node_if_test.op, ast.Not): #unary boolean                                    
             if isinstance(node_if_test.operand, ast.BoolOp): #Negation of bracketed boolean expressions more complex than initially anticipated   
@@ -275,9 +265,8 @@ class Transformer(Parentage):
                 last_if.test = node_ifnot_test
                 node_If_list.append(last_if)
         else:
-            if not self.short_circuiting or not self.is_short_circuited(node_if_test) or self.dict_node_shortcct[node_if_test] == 'or':                
-                node_if = self.get_If(node_if_test, [])
-                node_If_list.append(node_if)
+            node_if = self.get_If(node_if_test, [])
+            node_If_list.append(node_if)
 
         return node_If_list
 
@@ -312,79 +301,72 @@ class Transformer(Parentage):
         processed_if = []
         split = False 
         if_block_var_id = f'_boolIf{node.col_offset}'
-        self.tmp_bool_access[if_block_var_id] = False    
+        self.tmp_bool_access[if_block_var_id] = False  
 
-        if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
-            split = True #We will only split if the test has one of: and/or/not/elif/else
-            
-
-        #processed_body = self.process_stmt_list(node.body) #Process using list       
-        #processed_body = self.process_stmt_list((stmt for stmt in node.body))  #Process using in-line generator
-        processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
+        if self.short_circuiting:
+            reduced_if_test = self.reduce_if_test(node.test)  
+            node.test = reduced_if_test
         
-        if processed_body:
-            #Process test and merge body               
-            new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
-            if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
-                if split:
-                    node_assign_if_pre = self.get_Assign(if_block_var_id, ast.Store(), False) 
-                    processed_if.append(node_assign_if_pre) #Initialise the bool variable for this IF node    
-                    node_assign_if_post = self.get_Assign(if_block_var_id, ast.Store(), True) 
-                    #processed_body.insert(0, node_assign_if)  #Prepend to list     
-                    processed_body.appendleft(node_assign_if_post)  #Prepend to deque                 
-                processed_if.extend(self.merge_And(new_ifs, list(processed_body))) #Add the body to the new Ifs we got from breaking down the test
+        if node.test:
+            if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
+                split = True #We will only split if the test has one of: and/or/not/elif/else
+                
 
-        #Process orelse       
-        #processed_orelse = self.process_stmt_list(node.orelse)       
-        #processed_orelse = self.process_stmt_list((stmt for stmt in node.orelse))            
+            #processed_body = self.process_stmt_list(node.body) #Process using list       
+            #processed_body = self.process_stmt_list((stmt for stmt in node.body))  #Process using in-line generator
+            processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
+            
+            if processed_body:
+                #Process test and merge body               
+                new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
+                if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
+                    if split:
+                        node_assign_if_pre = self.get_Assign(if_block_var_id, ast.Store(), False) 
+                        processed_if.append(node_assign_if_pre) #Initialise the bool variable for this IF node    
+                        node_assign_if_post = self.get_Assign(if_block_var_id, ast.Store(), True) 
+                        #processed_body.insert(0, node_assign_if)  #Prepend to list     
+                        processed_body.appendleft(node_assign_if_post)  #Prepend to deque                 
+                    processed_if.extend(self.merge_And(new_ifs, list(processed_body))) #Add the body to the new Ifs we got from breaking down the test
+
+        #Process orelse                       
         processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
         if processed_orelse:     
             processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
 
         if processed_if and isinstance(processed_if[0], ast.Assign) and not self.tmp_bool_access[if_block_var_id]:
             processed_if.pop(0)
-            remover = RemoveUnaccessed(if_block_var_id)
-            clean_if = remover.visit(processed_if[0])
+            unaccessedRemover = RemoveUnaccessed(if_block_var_id)
+            clean_if = unaccessedRemover.visit(processed_if[0])
             processed_if = [clean_if]
         
         return processed_if
     
-    def is_collapsed_if_shortcircuited(self,node: ast.If):
-        short_cct = False
-        if isinstance(node.test, ast.BoolOp):
-            if isinstance(node.test.op, ast.And):
-                for operand in node.test.values:
-                    if self.is_short_circuited(operand) and self.dict_node_shortcct[operand] == 'and':
-                        short_cct = True #This is a short-circuited an 'and'
-                        break            
-        return short_cct    
-
+   
     def collapse_if(self, node: ast.If):
         processed_if = []
-        collapsed_if: ast.If = None
-       
-        collapsed_if = self.get_collapsed_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)        
+        
+        node = self.get_collapsed_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)        
 
         if self.short_circuiting:
-            reduced_if_test = self.reduce_if_test(collapsed_if.test)
+            reduced_if_test = self.reduce_if_test(node.test)
             if reduced_if_test:
-               collapsed_if.test = reduced_if_test 
-            else:                   
-                collapsed_if = None #Prune the 'if' part altogether       
+               node.test = reduced_if_test 
+            else:                                   
                 if node.orelse:
                     processed_if = node.orelse
+                node = None #Prune the 'if' part altogether           
                 
-        if collapsed_if:
+        if node:
             #Process body      
-            processed_body = self.process_stmt_list(self.field_generator(collapsed_if, 'body')) #Process using ast.iter_fields generator
+            processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
             if processed_body:
-                collapsed_if.body = list(processed_body)
+                node.body = list(processed_body)
                 #Process orelse       
                 processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
-                collapsed_if.orelse = list(processed_orelse)
-            else: #The entire body has been pruned 
-                collapsed_if = None #Can't have an if without a body, so prune the original if   
-            processed_if.append(collapsed_if)            
+                node.orelse = list(processed_orelse)
+            else: #The entire 'body' has been pruned 
+                node = None #Can't have an if without a body, so prune the original if   
+            processed_if.append(node)            
         
         return processed_if
     
@@ -426,8 +408,7 @@ else:
 if 1:
     if 2:
         if 0:
-            print ('And test executed')
-    
+            print ('And test executed')  
 '''
 
 tree = ast.parse(code1)
@@ -444,7 +425,7 @@ print(ast.dump(tree, indent='   '))
 #'if False and x' will prune this branch altogether
 #
 #new_tree = Transformer().visit(tree) 
-new_tree = Transformer(mode='E').visit(tree) 
+new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
 #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
 new_tree = ast.fix_missing_locations(new_tree)
 print(ast.dump(new_tree, indent='   '))
