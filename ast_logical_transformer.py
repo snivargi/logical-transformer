@@ -64,6 +64,7 @@ class Transformer(Parentage):
 
         node_call = self.get_Call('print', ast.Load(), ast.Constant(value = '<Node deleted>'))                
         node_expr = self.get_Expr(node_call)
+        node_expr.parent = p
 
         if self.mode == self.EXPAND:            
             processed_if = self.expand_if (node) #Break down this If node into its logical components
@@ -72,18 +73,11 @@ class Transformer(Parentage):
                 processed_if.append(node_expr)
             return  processed_if    
         elif self.mode == self.COLLAPSE:
-            new_node = self.collapse_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)
-            
-            #Return as a node
-            new_node.parent = p #Parent needs to be copied over from the node being replaced
-            return new_node
-        
-            #Return as a list
-            #processed_if.append (new_node) 
-            # if not processed_if:
-            #     print (f'Entire sub-tree {node_metadata} pruned')
-            #     processed_if.append(node_expr)
-            # return processed_if #This list will automatically become part of the 'Module'
+            processed_if = self.collapse_if(node) #Roll up nested Ifs into a single ast.BoolOp (op=ast.And)            
+            if not processed_if:
+                print (f'Entire sub-tree {node_metadata} pruned')
+                processed_if.append(node_expr)
+            return  processed_if    
         else:    
             super().generic_visit(node)
             return node
@@ -216,6 +210,34 @@ class Transformer(Parentage):
             print (f'Warn: {e}')    #Expression could not be evaluated at compile time (can only happen at run time)
         return  short_circuited 
 
+    def reduce_if_test(self, node_if_test: ast):        
+
+        reduced_if_test:ast.AST = None
+        if isinstance(node_if_test, ast.BoolOp):           
+            reduced_if_test = test = self.get_BoolOp(node_if_test.op, [])            
+            for test in node_if_test.values: 
+                reduced_test = self.reduce_if_test(test)                               
+                #last_test: ast.AST = tests[-1] if tests else []
+                if isinstance(node_if_test.op, ast.Or):                                                             
+                    if reduced_test: 
+                        if reduced_test in self.dict_node_shortcct and self.dict_node_shortcct[reduced_test] == 'or': 
+                            #We have found the first True condition with an OR. No need to evaluate the rest of the expression                        
+                            reduced_if_test.values.append(reduced_test) #If the return list is empty, add this condition first
+                            break
+                        reduced_if_test.values.append(reduced_test)
+                elif isinstance(node_if_test.op, ast.And):                    
+                    if not reduced_test:                        
+                        #We have found the first False condition with an AND. No need to evaluate the rest of the expression
+                        reduced_if_test = None #None of the other 'and' conditions will get executed
+                        break
+                    reduced_if_test.values.append(reduced_test)
+        else:
+            if not self.is_short_circuited(node_if_test) or self.dict_node_shortcct[node_if_test] == 'or':                                
+                reduced_if_test = node_if_test
+
+        return reduced_if_test
+
+
 
     def get_Ifs_AndOr(self, node_if_test: ast, if_block_var_id):
 
@@ -267,8 +289,11 @@ class Transformer(Parentage):
             except StopIteration:
                 break
             #print(f'Generator yielded {stmt.__class__.__name__}')
-            if  isinstance(stmt, ast.If):                
-                processed_if = self.expand_if (stmt)                
+            if  isinstance(stmt, ast.If):       
+                if self.mode == self.EXPAND:            
+                    processed_if = self.expand_if (stmt)  #Break down this If node into its logical components                    
+                elif self.mode == self.COLLAPSE:
+                    processed_if = self.collapse_if(stmt) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)                         
                 processed_list.extend(processed_if)    
             else:
                 processed_list.append(stmt) 
@@ -324,17 +349,52 @@ class Transformer(Parentage):
         
         return processed_if
     
-    def collapse_if(self, node: ast.If, operands: list = []):
+    def is_collapsed_if_shortcircuited(self,node: ast.If):
+        short_cct = False
+        if isinstance(node.test, ast.BoolOp):
+            if isinstance(node.test.op, ast.And):
+                for operand in node.test.values:
+                    if self.is_short_circuited(operand) and self.dict_node_shortcct[operand] == 'and':
+                        short_cct = True #This is a short-circuited an 'and'
+                        break            
+        return short_cct    
+
+    def collapse_if(self, node: ast.If):
+        processed_if = []
+        collapsed_if: ast.If = None
+       
+        collapsed_if = self.get_collapsed_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)        
+
+        if self.short_circuiting:
+            reduced_if_test = self.reduce_if_test(collapsed_if.test)
+            if reduced_if_test:
+               collapsed_if.test = reduced_if_test 
+            else:                   
+                collapsed_if = None #Prune the 'if' part altogether       
+                if node.orelse:
+                    processed_if = node.orelse
+                
+        if collapsed_if:
+            #Process body      
+            processed_body = self.process_stmt_list(self.field_generator(collapsed_if, 'body')) #Process using ast.iter_fields generator
+            if processed_body:
+                collapsed_if.body = list(processed_body)
+                #Process orelse       
+                processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
+                collapsed_if.orelse = list(processed_orelse)
+            else: #The entire body has been pruned 
+                collapsed_if = None #Can't have an if without a body, so prune the original if   
+            processed_if.append(collapsed_if)            
+        
+        return processed_if
+    
+    def get_collapsed_if(self, node: ast.If, operands: list = []):
         ret_if:ast.If = None
 
-        # if self.short_circuiting and self.is_short_circuited(node.test) and self.dict_node_shortcct[node.test] == 'and':
-        #     #This node short-circuits an 'and'
-        #     return
-        
         if len(node.body)==1 and isinstance(node.body[0], ast.If) and not node.orelse: #We have a nested 'and'
             nested_if = node.body[0]        
             operands.append(node.test)
-            ret_if = self.collapse_if(nested_if, operands)   
+            ret_if = self.get_collapsed_if(nested_if, operands)   
         elif operands:            
             operands.append(node.test)
             test = self.get_BoolOp(ast.And(), operands)
@@ -385,7 +445,7 @@ print(ast.dump(tree, indent='   '))
 #
 #new_tree = Transformer().visit(tree) 
 new_tree = Transformer(mode='E').visit(tree) 
-#new_tree = Transformer(mode='C', , short_circuiting_flag = False).visit(tree) 
+#new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
 new_tree = ast.fix_missing_locations(new_tree)
 print(ast.dump(new_tree, indent='   '))
 
