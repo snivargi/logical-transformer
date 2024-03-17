@@ -3,6 +3,9 @@ from typing import Any
 from collections import deque
 
 class Parentage(ast.NodeTransformer):
+    '''
+    Adds and populates the 'parent' attribute for each node
+    '''      
     parent = None
 
     def visit(self, node: ast.AST):
@@ -16,6 +19,9 @@ class Parentage(ast.NodeTransformer):
         return transformed_node
 
 class RemoveUnaccessed(ast.NodeTransformer):
+    '''
+    Removes unaccessed variables from the node's scope for which this class is invoked
+    '''      
     def __init__(self, id) -> None:
         self.node_Name_id = id
         super().__init__()
@@ -28,16 +34,59 @@ class RemoveUnaccessed(ast.NodeTransformer):
             return node
         
 class Transformer(Parentage):
+    '''
+    Transforms a node using the specified option:
+    E = EXPAND: Replace the keywords and/or/not/elif/else. This is essentially done using nested ifs
+    e.g.
+
+    if a and b:
+        x()
+
+    is transformed to-
+
+    if a:
+        if b:
+            x()        
+
+    C = COLLAPSE: Flatten a nested 'if' structure where possible
+    e.g.
+
+    if a:
+        if b:
+            x()       
+
+    is transformed to-         
+
+    if a and b:
+        x()
+
+    By default, 'if' statements tests having boolean ops will be "short-circuited" where possible 
+    
+    e.g.
+
+    'if 1 or x' will become 'if 1:'
+    
+    'if False and x' will result in this branch being pruned altogether    
+
+    '''      
     EXPAND = 'E'
     COLLAPSE = 'C'
-    tmp_bool_access = {} #Dict to track temp variable (for every 'if' block) access
+    tmp_bool_access = {} #Dictionary to track temp variable (for every 'if' block) access
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
+        '''
+        Constructur for this transformer takes 2 optional arguments
+        mode: E(xpand)/C(ollapse) indicating nesting or flattening of if stetements; Default = E
+        short_circuiting_flag: Indicator for whether short-circuiting should be applied; Default = True
+        '''
         self.mode = mode
         self.short_circuiting = short_circuiting_flag         
         self.dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
         super().__init__()
 
     def generic_visit(self, node):
+        '''
+        Prints traversal info of nodes within the AST
+        '''    
         try:        
             line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
         except Exception:
@@ -54,6 +103,9 @@ class Transformer(Parentage):
     #     return node    
 
     def visit_If(self, node: ast.If) -> Any:
+        '''
+        Transforms an 'if' node (along with its children) encountered while traversing a tree
+        ''' 
         processed_if = []
         line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'        
         node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
@@ -62,7 +114,7 @@ class Transformer(Parentage):
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
 
-        node_call = self.get_Call('print', ast.Load(), ast.Constant(value = '<Node deleted>'))                
+        node_call = self.get_Call('print', ast.Load(), ast.Constant(value = '<Node pruned>'))                
         node_expr = self.get_Expr(node_call)
         node_expr.parent = p
 
@@ -84,7 +136,9 @@ class Transformer(Parentage):
         
 
     def get_Assign(self, node_Name_id, node_Name_ctx, bool_val = False):
-
+        '''
+        Returns an ast.Assign node constructed using the specified parameters
+        ''' 
         node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
         node_Assign = ast.Assign(
             targets=[node_Name],
@@ -93,7 +147,9 @@ class Transformer(Parentage):
         return node_Assign
 
     def get_If(self, if_test, if_body, if_orelse = []):
-
+        '''
+        Returns an ast.If node constructed using the specified parameters
+        ''' 
         node_If = ast.If(
             test = if_test,
             body = if_body,
@@ -102,7 +158,9 @@ class Transformer(Parentage):
         return node_If
 
     def get_Compare(self, compare_left, compare_ops, compare_comparators):
-
+        '''
+        Returns an ast.Compare node constructed using the specified parameters
+        ''' 
         node_Compare = ast.Compare(
             left = compare_left,
             ops = [compare_ops],
@@ -111,7 +169,9 @@ class Transformer(Parentage):
         return node_Compare
 
     def get_Name(self, name_id, name_ctx):
-
+        '''
+        Returns an ast.Compare node constructed using the specified parameters
+        '''
         node_Name = ast.Name(
             id = name_id,
             ctx = name_ctx
@@ -119,13 +179,18 @@ class Transformer(Parentage):
         return node_Name
     
     def get_Expr(self, value):
+        '''
+        Returns an ast.Expr node constructed using the specified parameters
+        '''
         node_Expr = ast.Expr(
             value=value
         )
         return node_Expr
     
     def get_Call(self, node_Name_id, node_Name_ctx, node_Call_arg):
-
+        '''
+        Returns an ast.Call node constructed using the specified parameters
+        '''
         node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
         node_Call = ast.Call(
             func=node_Name,
@@ -134,15 +199,30 @@ class Transformer(Parentage):
         )
         return node_Call
     
-    def get_BoolOp(self, boolop_op: ast, boolop_values: list):
-        
+    def get_BoolOp(self, boolop_op: ast.AST, boolop_values: list):
+        '''
+        Returns an ast.BoolOp node constructed using the specified parameters
+        '''
         node_BoolOp = ast.BoolOp(
             op=boolop_op,
             values=boolop_values
         )
         return node_BoolOp
     
-    def merge_Not(self, lroper: list, if_block_var_id):        
+    def get_UnaryOp(self, unaryop_op: ast.AST, unaryop_operand: ast.AST):
+        '''
+        Returns an ast.UnaryOp node constructed using the specified parameters
+        '''
+        node_UnaryOp = ast.UnaryOp(
+            op=unaryop_op,
+            operand=unaryop_operand
+        )
+        return node_UnaryOp
+    
+    def merge_Not(self, lroper: list, if_block_var_id):  
+        '''
+        Wrap an operand within the  NOT operator
+        '''      
         processed_list = []
         last_if: ast.If = lroper.pop()
         last_if.body = ast.Pass() #If the condition is True, do nothing (pass)
@@ -152,7 +232,9 @@ class Transformer(Parentage):
 
 
     def merge_And(self, loper: list, roper: list):
-
+        '''
+        Join/merge left and right operands with the AND operator    
+        '''
         processed_list = []
         if loper:
             for item in loper:
@@ -167,7 +249,9 @@ class Transformer(Parentage):
         return processed_list
 
     def merge_Or(self, loper: list, roper: list, if_block_var_id):
-
+        '''
+        Join/merge left and right operands with the OR operator    
+        '''
         node_if: ast.If
         if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
@@ -179,6 +263,9 @@ class Transformer(Parentage):
 
     @staticmethod 
     def is_iftest_truthy_falsy(node_iftest):
+        '''
+        Skeleton method for checking if the test of an 'if' node is of a type that can be evaluated as True or False
+        '''
         return (
             isinstance(node_iftest, ast.Constant)
             or isinstance(node_iftest, ast.FormattedValue)
@@ -191,37 +278,57 @@ class Transformer(Parentage):
 
     @staticmethod
     def get_node_val(node):
+        '''
+        Takes in an AST node, changes it to an ast.Expression node and 'eval's it to get its result 
+        If an exception occurs because evaluation fails, it is to be handled by the caller of this method
+        '''
         expr = ast.Expression(body=node)
         ast.fix_missing_locations(expr)
         val = eval(compile(expr, filename='', mode='eval'))
         return val
     
     
-    def is_short_circuited(self, node_if_test: ast):
+    def is_short_circuited(self, node_if_test: ast.AST):
+        '''
+        -'eval's the input node (ast.If.test)
+        - Adds node and eval result to the dict_node_shortcct attribute
+
+        A True value will short-circuit an OR
+
+        A False value will short-circuit an AND
+
+        Prints a warning if Expression could not be evaluated at compile time
+        '''
         short_circuited = False        
         try:            
             val = self.get_node_val(node_if_test)
             short_circuited = True #Expression was evalauted successfully, so we should be able to do a truth test
-            if (val): #We have a value that's evaluated to True                    
-                self.dict_node_shortcct[node_if_test] = 'or' #A True value will short-circuit an OR
-            elif (not val):  #We have a value that's evaluated to False                    
-                self.dict_node_shortcct[node_if_test] = 'and'#A False value will short-circuit an AND
+            self.dict_node_shortcct[node_if_test] = val #Update the dict_node_shortcct attribute           
         except Exception as e:
-            print (f'Warn: {e}')    #Expression could not be evaluated at compile time (can only happen at run time)
+            print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)
         return  short_circuited 
 
-    def reduce_if_test(self, node_if_test: ast):        
-
+    def reduce_if_test(self, node_if_test: ast.AST):        
+        '''
+        Takes in an ast.If.test node and recursively condenses it to the bare minimum while keeping it logically consistent
+        
+        e.g.
+        '0 or 1' becomes '1'
+        '1 and 0' becomes '0'
+        'not 0' becomes True
+        'not 1' becomes None
+        '''
         reduced_if_test:ast.AST = None
         if isinstance(node_if_test, ast.BoolOp):           
-            reduced_if_test = test = self.get_BoolOp(node_if_test.op, [])            
+            reduced_if_test = self.get_BoolOp(node_if_test.op, [])            
             for test in node_if_test.values: 
                 reduced_test = self.reduce_if_test(test)                                               
                 if isinstance(node_if_test.op, ast.Or):                                                             
                     if reduced_test: 
-                        if reduced_test in self.dict_node_shortcct and self.dict_node_shortcct[reduced_test] == 'or': 
+                        if reduced_test in self.dict_node_shortcct and self.dict_node_shortcct[reduced_test]: 
                             #We have found the first True condition with an OR. No need to evaluate the rest of the expression                        
-                            reduced_if_test.values.append(reduced_test) #If the return list is empty, add this condition first
+                            #reduced_if_test.values.append(reduced_test) #Return a BoolOp[op='Or'] with only 1 operand
+                            reduced_if_test = reduced_test #Return the test on its own rather than as BoolOp.Or with only 1 operand
                             break
                         reduced_if_test.values.append(reduced_test)
                 elif isinstance(node_if_test.op, ast.And):                    
@@ -230,16 +337,32 @@ class Transformer(Parentage):
                         reduced_if_test = None #None of the other 'and' conditions will get executed
                         break
                     reduced_if_test.values.append(reduced_test)
+        elif isinstance(node_if_test, ast.UnaryOp): 
+            if isinstance(node_if_test.op, ast.Not): #unary boolean 
+                reduced_if_test = self.get_UnaryOp(node_if_test.op, None)     
+                reduced_test = self.reduce_if_test(node_if_test.operand)  
+                if reduced_test in self.dict_node_shortcct and self.dict_node_shortcct[reduced_test]:                         
+                    #We have found a True condition with a NOT. !True == False, so this condition can go
+                    reduced_if_test = None
+                else:    
+                    if reduced_test:
+                        reduced_if_test.operand = reduced_test
+                    else:
+                        reduced_if_test = ast.Constant(value = True)  #!False == True, so replace 'not <cond>' with True
+            else:
+                reduced_if_test = node_if_test            
         else:
-            if not self.is_short_circuited(node_if_test) or self.dict_node_shortcct[node_if_test] == 'or':                                
+            if not self.is_short_circuited(node_if_test) or self.dict_node_shortcct[node_if_test]:                                
                 reduced_if_test = node_if_test
 
         return reduced_if_test
 
 
 
-    def get_Ifs_AndOr(self, node_if_test: ast, if_block_var_id):
-
+    def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id):
+        '''
+        Takes in an ast.If.test node and recursively expands it using nested ifs while keeping it logically consistent
+        '''
         node_If_list = []
         if isinstance(node_if_test, ast.BoolOp):           
             for node in node_if_test.values:                
@@ -271,6 +394,11 @@ class Transformer(Parentage):
         return node_If_list
 
     def process_stmt_list(self, gen):
+        '''
+        Takes in a generator object yielding statements from a list.
+        Depending whether we're expanding or collapsing ifs, calls the appropriate method for the statements.
+        Returns a new list of statements as a deque object
+        '''
         processed_list = deque([])                
         while True:
             try:
@@ -289,7 +417,10 @@ class Transformer(Parentage):
         return  processed_list 
 
     def field_generator(self, node, field):
-
+        '''
+        Takes in a node with a list of statements (field)
+        Yields a statement from the list at a time 
+        '''
         for (fieldname, value) in ast.iter_fields(node):
             if fieldname == field:
                 for stmt in value:
@@ -298,6 +429,9 @@ class Transformer(Parentage):
     
 
     def expand_if(self, node: ast.If):
+        '''
+        Takes in an ast.If node and recursively replaces the keywords and/or/not/elif/else using nested ifs
+        '''
         processed_if = []
         split = False 
         if_block_var_id = f'_boolIf{node.col_offset}'
@@ -343,6 +477,9 @@ class Transformer(Parentage):
     
    
     def collapse_if(self, node: ast.If):
+        '''
+        Takes in an ast.If node and recursively flattens nested ifs where possible
+        '''
         processed_if = []
         
         node = self.get_collapsed_if(node, []) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)        
@@ -371,6 +508,9 @@ class Transformer(Parentage):
         return processed_if
     
     def get_collapsed_if(self, node: ast.If, operands: list = []):
+        '''
+        Takes in an ast.If node and recursively flattens it to the max depth possible while remaining logically consistent
+        '''
         ret_if:ast.If = None
 
         if len(node.body)==1 and isinstance(node.body[0], ast.If) and not node.orelse: #We have a nested 'and'
@@ -410,34 +550,34 @@ if 1:
         if 0:
             print ('And test executed')  
 '''
+def main():   
+    '''
+    Tests our code
+    '''    
+    #READ and PARSE the code, generate an AST
+    tree = ast.parse(code1)
+    print(ast.dump(tree, indent='   '))
 
-tree = ast.parse(code1)
-print(ast.dump(tree, indent='   '))
+    #VISIT and TRANSFORM the AST    
+    #new_tree = Transformer().visit(tree) 
+    new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
+    #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
+    new_tree = ast.fix_missing_locations(new_tree)
+    print(ast.dump(new_tree, indent='   '))
 
-#We don't want to "short-circuit" 'if' statement tests having boolean ops
-#new_tree = Transformer(mode='E', short_circuiting = False).visit(tree) 
+    #UNPARSE the transformed AST and VIEW new code 
+    new_code = ast.unparse(new_tree)
+    print(new_code)
 
-#By default, 'if' statements tests having boolean ops will be "short-circuited" where possible 
-#
-# Examples:
-# 'if 1 or x' will become 'if 1:'
-#
-#'if False and x' will prune this branch altogether
-#
-#new_tree = Transformer().visit(tree) 
-new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
-#new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
-new_tree = ast.fix_missing_locations(new_tree)
-print(ast.dump(new_tree, indent='   '))
+    #WRITE new code to file
+    with open('ast_transformed_code.py', 'w') as f:
+            f.write(new_code)  
 
-#View new code
-new_code = ast.unparse(new_tree)
-print(new_code)
+    #COMPILE the new AST into a binary object        
+    # code_object = compile(new_tree, '', 'exec')
 
-#Write new code to file
-with open('ast_transformed_code.py', 'w') as f:
-        f.write(new_code)  
-
-#Compile and Execute new code        
-# code_object = compile(new_tree, '', 'exec')
-# exec(code_object)
+    #EXECUTE the code in the binary object        
+    # exec(code_object)
+            
+if __name__ == '__main__':    
+    main()            

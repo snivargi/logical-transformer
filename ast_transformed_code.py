@@ -9,4 +9,4 @@ if 'False':
 if _boolIf0 is False:
     print(False)
 print(True)
-print('<Node deleted>')
+print('<Node pruned>')
