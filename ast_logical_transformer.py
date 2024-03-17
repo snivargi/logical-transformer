@@ -35,7 +35,7 @@ class RemoveUnaccessed(ast.NodeTransformer):
         
 class Transformer(Parentage):
     '''
-    Transforms a node using the specified option:
+    Transforms an AST using the specified option:
     E = EXPAND: Replace the keywords and/or/not/elif/else. This is essentially done using nested ifs
     e.g.
 
@@ -74,8 +74,8 @@ class Transformer(Parentage):
     tmp_bool_access = {} #Dictionary to track temp variable (for every 'if' block) access
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
         '''
-        Constructur for this transformer takes 2 optional arguments
-        mode: E(xpand)/C(ollapse) indicating nesting or flattening of if stetements; Default = E
+        Constructor for this transformer takes 2 optional arguments
+        mode: E(xpand)/C(ollapse) indicating nesting or flattening of if statements; Default = E
         short_circuiting_flag: Indicator for whether short-circuiting should be applied; Default = True
         '''
         self.mode = mode
@@ -170,7 +170,7 @@ class Transformer(Parentage):
 
     def get_Name(self, name_id, name_ctx):
         '''
-        Returns an ast.Compare node constructed using the specified parameters
+        Returns an ast.Name node constructed using the specified parameters
         '''
         node_Name = ast.Name(
             id = name_id,
@@ -279,7 +279,7 @@ class Transformer(Parentage):
     @staticmethod
     def get_node_val(node):
         '''
-        Takes in an AST node, changes it to an ast.Expression node and 'eval's it to get its result 
+        Takes in a node, changes it to an ast.Expression node and 'eval's it to get its result 
         If an exception occurs because evaluation fails, it is to be handled by the caller of this method
         '''
         expr = ast.Expression(body=node)
