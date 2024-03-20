@@ -10,3 +10,6 @@ if _boolIf0 is False:
     print(False)
 print(True)
 print('<Node pruned>')
+print(-1073741824.0)
+print(1)
+print(bool(a))

@@ -4,7 +4,7 @@ from collections import deque
 
 class Parentage(ast.NodeTransformer):
     '''
-    Adds and populates the 'parent' attribute for each node
+    Adds and populates the 'parent' attribute for each node in the AST
     '''      
     parent = None
 
@@ -64,14 +64,14 @@ class Transformer(Parentage):
     
     e.g.
 
-    'if 1 or x' will become 'if 1:'
+    'if 1 or x' will become 'if 1'
     
     'if False and x' will result in this branch being pruned altogether    
 
     '''      
     EXPAND = 'E'
     COLLAPSE = 'C'
-    tmp_bool_access = {} #Dictionary to track temp variable (for every 'if' block) access
+    tmp_bool_access = {} #Dictionary to track if the temp variable (for every 'if' block) has been accessed
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
         '''
         Constructor for this transformer takes 2 optional arguments
@@ -102,9 +102,30 @@ class Transformer(Parentage):
     #     node.body = self.process_stmt_list((stmt for stmt in node.body))    
     #     return node    
 
+    def visit_Call(self, node: ast.Call) -> ast.Call:
+        '''
+        Transforms a 'call' node encountered while traversing an AST
+        It condenses the 'args' field by 'eval'ing it 
+
+        e.g. 'print (True or False)' becomes 'print (True)'
+        
+        If eval fails, it returns the original node
+        ''' 
+        if self.mode == self.EXPAND: #Only do this if we're trying to replace and/or/not    
+            try:            
+                val = self.get_node_val(node.args[0])   
+                node.args[0] = ast.Constant(value=val)                     
+            except Exception as e:
+                print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)        
+            return node
+        else:
+            super().generic_visit(node)
+            return node
+        
+
     def visit_If(self, node: ast.If) -> Any:
         '''
-        Transforms an 'if' node (along with its children) encountered while traversing a tree
+        Transforms an 'if' node (along with its children) encountered while traversing an AST
         ''' 
         processed_if = []
         line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'        
@@ -279,7 +300,7 @@ class Transformer(Parentage):
     @staticmethod
     def get_node_val(node):
         '''
-        Takes in a node, changes it to an ast.Expression node and 'eval's it to get its result 
+        Takes in a node, changes it to an ast.Expression and 'eval's it to get its result 
         If an exception occurs because evaluation fails, it is to be handled by the caller of this method
         '''
         expr = ast.Expression(body=node)
@@ -297,7 +318,7 @@ class Transformer(Parentage):
 
         A False value will short-circuit an AND
 
-        Prints a warning if Expression could not be evaluated at compile time
+        Prints a warning if Expression could not be evaluated at 'compile time'
         '''
         short_circuited = False        
         try:            
@@ -310,7 +331,7 @@ class Transformer(Parentage):
 
     def reduce_if_test(self, node_if_test: ast.AST):        
         '''
-        Takes in an ast.If.test node and recursively condenses it to the bare minimum while keeping it logically consistent
+        Takes in an ast.If.test node and recursively 'condenses' it to the bare minimum while keeping it logically consistent
         
         e.g.
         '0 or 1' becomes '1'
@@ -359,9 +380,9 @@ class Transformer(Parentage):
 
 
 
-    def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id):
+    def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id: str):
         '''
-        Takes in an ast.If.test node and recursively expands it using nested ifs while keeping it logically consistent
+        Takes in an ast.If.test node and recursively 'expands' it using nested ifs while keeping it logically consistent
         '''
         node_If_list = []
         if isinstance(node_if_test, ast.BoolOp):           
@@ -395,9 +416,9 @@ class Transformer(Parentage):
 
     def process_stmt_list(self, gen):
         '''
-        Takes in a generator object yielding statements from a list.
-        Depending whether we're expanding or collapsing ifs, calls the appropriate method for the statements.
-        Returns a new list of statements as a deque object
+        Takes in a generator object yielding statements from a list
+        Depending whether we're expanding or collapsing ifs, calls the appropriate method for each statement
+        Returns the processed list of statements as a deque object
         '''
         processed_list = deque([])                
         while True:
@@ -411,7 +432,11 @@ class Transformer(Parentage):
                     processed_if = self.expand_if (stmt)  #Break down this If node into its logical components                    
                 elif self.mode == self.COLLAPSE:
                     processed_if = self.collapse_if(stmt) #Roll up nested IFs into a single ast.BoolOp (op=ast.And)                         
-                processed_list.extend(processed_if)    
+                processed_list.extend(processed_if) 
+            elif isinstance(stmt, ast.Expr):         
+                if isinstance(stmt.value, ast.Call) and not (isinstance(stmt.value.args[0], ast.Constant)):
+                    stmt.value = self.visit_Call (stmt.value)
+                processed_list.append(stmt)     
             else:
                 processed_list.append(stmt) 
         return  processed_list 
@@ -543,12 +568,20 @@ else:
 if 0:
     print (False)
 else:
-    print (True)    
+    print (True or False)    
 
 if 1:
     if 2:
         if 0:
             print ('And test executed')  
+
+
+print (- (2 + 3 / .5) ** 10)
+
+print(1 or 2 and not not 0)
+
+print(bool(a))
+
 '''
 def main():   
     '''
