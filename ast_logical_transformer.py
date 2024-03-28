@@ -114,13 +114,13 @@ class Transformer(Parentage):
         if self.mode == self.EXPAND and len(node.args): #Only do this if we're trying to replace and/or/not/in    
             try:            
                 val = self.get_node_val(node.args[0])                   
-                if Transformer.is_primitive(val):
+                if Transformer.isprimitive(val):
                     node.args[0] = ast.Constant(value=val) 
                 else:
                     super().generic_visit(node) #We need this for any nodes nested within the Call node   
             except Exception as e:
                 print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)        
-                
+                super().generic_visit(node) #We need this for any nodes nested within the Call node                   
             return node
         else:
             super().generic_visit(node)
@@ -303,9 +303,9 @@ class Transformer(Parentage):
         ) 
     
     @staticmethod 
-    def is_primitive(val):
+    def isprimitive(val):
         '''
-        Method for checking if a string value is of a primitive datatype - bool, int, float, str   
+        Method for checking if a value is of a primitive datatype - bool, int, float, str   
         '''
         return (
             isinstance(val, bool)
