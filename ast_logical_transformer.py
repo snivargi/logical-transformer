@@ -83,7 +83,7 @@ class Transformer(Parentage):
         self.dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
         super().__init__()
 
-    def generic_visit(self, node):
+    def generic_visit(self, node: ast.AST) -> ast.AST:
         '''
         Prints traversal info of nodes within the AST
         '''    
@@ -117,6 +117,7 @@ class Transformer(Parentage):
                 node.args[0] = ast.Constant(value=val)                     
             except Exception as e:
                 print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)        
+                super().generic_visit(node) #We need this for any nodes nested within the Call
             return node
         else:
             super().generic_visit(node)
@@ -135,7 +136,8 @@ class Transformer(Parentage):
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
 
-        node_call = self.get_Call('print', ast.Load(), ast.Constant(value = '<Node pruned>'))                
+        node_name = self.get_Name('print', ast.Load())
+        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])  # node_call = self.get_Call((self.get_Name('bool', ast.Load())), [last_if.test])              
         node_expr = self.get_Expr(node_call)
         node_expr.parent = p
 
@@ -156,18 +158,17 @@ class Transformer(Parentage):
             return node
         
 
-    def get_Assign(self, node_Name_id, node_Name_ctx, bool_val = False):
+    def get_Assign(self, assign_targets: list, assign_value: ast.AST) -> ast.Assign:
         '''
         Returns an ast.Assign node constructed using the specified parameters
-        ''' 
-        node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
+        '''         
         node_Assign = ast.Assign(
-            targets=[node_Name],
-            value=ast.Constant(value=bool_val)
+            targets=assign_targets,
+            value= assign_value
         )
         return node_Assign
 
-    def get_If(self, if_test, if_body, if_orelse = []):
+    def get_If(self, if_test, if_body: list, if_orelse: list = []) -> ast.If:
         '''
         Returns an ast.If node constructed using the specified parameters
         ''' 
@@ -178,18 +179,18 @@ class Transformer(Parentage):
         )
         return node_If
 
-    def get_Compare(self, compare_left, compare_ops, compare_comparators):
+    def get_Compare(self, compare_left: ast.AST, compare_ops: list, compare_comparators: list) -> ast.Compare:
         '''
         Returns an ast.Compare node constructed using the specified parameters
         ''' 
         node_Compare = ast.Compare(
             left = compare_left,
-            ops = [compare_ops],
-            comparators = [compare_comparators]
+            ops = compare_ops,
+            comparators = compare_comparators
         )
         return node_Compare
 
-    def get_Name(self, name_id, name_ctx):
+    def get_Name(self, name_id: str, name_ctx: ast.AST) -> ast.Name:
         '''
         Returns an ast.Name node constructed using the specified parameters
         '''
@@ -199,7 +200,7 @@ class Transformer(Parentage):
         )
         return node_Name
     
-    def get_Expr(self, value):
+    def get_Expr(self, value: ast.AST) -> ast.Expr:
         '''
         Returns an ast.Expr node constructed using the specified parameters
         '''
@@ -208,19 +209,18 @@ class Transformer(Parentage):
         )
         return node_Expr
     
-    def get_Call(self, node_Name_id, node_Name_ctx, node_Call_arg):
+    def get_Call(self, call_func: ast.AST, call_args: list) -> ast.Call:
         '''
         Returns an ast.Call node constructed using the specified parameters
-        '''
-        node_Name = self.get_Name(node_Name_id, node_Name_ctx)                                
+        '''        
         node_Call = ast.Call(
-            func=node_Name,
-            args=[node_Call_arg],
+            func=call_func,
+            args=call_args,
             keywords=[]
         )
         return node_Call
     
-    def get_BoolOp(self, boolop_op: ast.AST, boolop_values: list):
+    def get_BoolOp(self, boolop_op: ast.AST, boolop_values: list) -> ast.BoolOp:
         '''
         Returns an ast.BoolOp node constructed using the specified parameters
         '''
@@ -230,7 +230,7 @@ class Transformer(Parentage):
         )
         return node_BoolOp
     
-    def get_UnaryOp(self, unaryop_op: ast.AST, unaryop_operand: ast.AST):
+    def get_UnaryOp(self, unaryop_op: ast.AST, unaryop_operand: ast.AST) -> ast.UnaryOp:
         '''
         Returns an ast.UnaryOp node constructed using the specified parameters
         '''
@@ -240,7 +240,7 @@ class Transformer(Parentage):
         )
         return node_UnaryOp
     
-    def merge_Not(self, lroper: list, if_block_var_id):  
+    def merge_Not(self, lroper: list, if_block_var_id: str) -> list:  
         '''
         Wrap an operand within the  NOT operator
         '''      
@@ -252,7 +252,7 @@ class Transformer(Parentage):
         return processed_list 
 
 
-    def merge_And(self, loper: list, roper: list):
+    def merge_And(self, loper: list, roper: list) -> list:
         '''
         Join/merge left and right operands with the AND operator    
         '''
@@ -269,18 +269,20 @@ class Transformer(Parentage):
             processed_list = roper
         return processed_list
 
-    def merge_Or(self, loper: list, roper: list, if_block_var_id):
+    def merge_Or(self, loper: list, roper: list, if_block_var_id: str) -> list:
         '''
         Join/merge left and right operands with the OR operator    
         '''
+        processed_list = []
         node_if: ast.If
         if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
-            node_if_test = self.get_Compare(node_temp_var_name, ast.Is(), ast.Constant(value = False))
+            node_if_test = self.get_Compare(node_temp_var_name, [ast.Is()], [ast.Constant(value = False)]) #Add a line that checks if the temp bool is False - we only do the 'OR' part if it is
             self.tmp_bool_access[if_block_var_id] = True
             node_if = self.get_If(node_if_test, roper)
             roper = [node_if]                
-        return  loper + roper
+        processed_list = loper + roper   
+        return processed_list 
 
     @staticmethod 
     def is_iftest_truthy_falsy(node_iftest):
@@ -298,7 +300,7 @@ class Transformer(Parentage):
         ) 
 
     @staticmethod
-    def get_node_val(node):
+    def get_node_val(node) -> Any:
         '''
         Takes in a node, changes it to an ast.Expression and 'eval's it to get its result 
         If an exception occurs because evaluation fails, it is to be handled by the caller of this method
@@ -309,7 +311,7 @@ class Transformer(Parentage):
         return val
     
     
-    def is_short_circuited(self, node_if_test: ast.AST):
+    def is_short_circuited(self, node_if_test: ast.AST) -> bool:
         '''
         -'eval's the input node (ast.If.test)
         - Adds node and eval result to the dict_node_shortcct attribute
@@ -329,7 +331,7 @@ class Transformer(Parentage):
             print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)
         return  short_circuited 
 
-    def reduce_if_test(self, node_if_test: ast.AST):        
+    def reduce_if_test(self, node_if_test: ast.AST) -> Any:        
         '''
         Takes in an ast.If.test node and recursively 'condenses' it to the bare minimum while keeping it logically consistent
         
@@ -380,7 +382,7 @@ class Transformer(Parentage):
 
 
 
-    def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id: str):
+    def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id: str) -> list:
         '''
         Takes in an ast.If.test node and recursively 'expands' it using nested ifs while keeping it logically consistent
         '''
@@ -405,7 +407,9 @@ class Transformer(Parentage):
             else:
                 new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)        
                 last_if: ast.If = new_Ifs[-1] 
-                node_ifnot_test = self.get_Compare(ast.Constant(value = False), ast.Eq(), self.get_Call('bool', ast.Load(), last_if.test))
+                node_name = self.get_Name('bool', ast.Load())
+                node_call = self.get_Call(node_name, [last_if.test])
+                node_ifnot_test = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
                 last_if.test = node_ifnot_test
                 node_If_list.append(last_if)
         else:
@@ -414,7 +418,7 @@ class Transformer(Parentage):
 
         return node_If_list
 
-    def process_stmt_list(self, gen):
+    def process_stmt_list(self, gen) -> deque:
         '''
         Takes in a generator object yielding statements from a list
         Depending whether we're expanding or collapsing ifs, calls the appropriate method for each statement
@@ -435,13 +439,13 @@ class Transformer(Parentage):
                 processed_list.extend(processed_if) 
             elif isinstance(stmt, ast.Expr):         
                 if isinstance(stmt.value, ast.Call) and not (isinstance(stmt.value.args[0], ast.Constant)):
-                    stmt.value = self.visit_Call (stmt.value)
+                    stmt.value = self.visit_Call (stmt.value) #Try to 'reduce' the call expression to its result
                 processed_list.append(stmt)     
             else:
                 processed_list.append(stmt) 
         return  processed_list 
 
-    def field_generator(self, node, field):
+    def field_generator(self, node: ast.AST, field: str) -> Any:
         '''
         Takes in a node with a list of statements (field)
         Yields a statement from the list at a time 
@@ -453,7 +457,7 @@ class Transformer(Parentage):
 
     
 
-    def expand_if(self, node: ast.If):
+    def expand_if(self, node: ast.If) -> list:
         '''
         Takes in an ast.If node and recursively replaces the keywords and/or/not/elif/else using nested ifs
         '''
@@ -480,9 +484,9 @@ class Transformer(Parentage):
                 new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
                 if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
                     if split:
-                        node_assign_if_pre = self.get_Assign(if_block_var_id, ast.Store(), False) 
+                        node_assign_if_pre = self.get_Assign([(self.get_Name(if_block_var_id, ast.Store()))], ast.Constant(value=False)) 
                         processed_if.append(node_assign_if_pre) #Initialise the bool variable for this IF node    
-                        node_assign_if_post = self.get_Assign(if_block_var_id, ast.Store(), True) 
+                        node_assign_if_post = self.get_Assign([(self.get_Name(if_block_var_id, ast.Store()))], ast.Constant(value=True)) 
                         #processed_body.insert(0, node_assign_if)  #Prepend to list     
                         processed_body.appendleft(node_assign_if_post)  #Prepend to deque                 
                     processed_if.extend(self.merge_And(new_ifs, list(processed_body))) #Add the body to the new Ifs we got from breaking down the test
@@ -501,7 +505,7 @@ class Transformer(Parentage):
         return processed_if
     
    
-    def collapse_if(self, node: ast.If):
+    def collapse_if(self, node: ast.If) -> list:
         '''
         Takes in an ast.If node and recursively flattens nested ifs where possible
         '''
@@ -532,7 +536,7 @@ class Transformer(Parentage):
         
         return processed_if
     
-    def get_collapsed_if(self, node: ast.If, operands: list = []):
+    def get_collapsed_if(self, node: ast.If, operands: list = []) -> ast.If:
         '''
         Takes in an ast.If node and recursively flattens it to the max depth possible while remaining logically consistent
         '''
