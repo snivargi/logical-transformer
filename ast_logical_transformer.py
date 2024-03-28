@@ -111,13 +111,16 @@ class Transformer(Parentage):
         
         If eval fails, it returns the original node
         ''' 
-        if self.mode == self.EXPAND: #Only do this if we're trying to replace and/or/not    
+        if self.mode == self.EXPAND and len(node.args): #Only do this if we're trying to replace and/or/not/in    
             try:            
-                val = self.get_node_val(node.args[0])   
-                node.args[0] = ast.Constant(value=val)                     
+                val = self.get_node_val(node.args[0])                   
+                if Transformer.is_primitive(val):
+                    node.args[0] = ast.Constant(value=val) 
+                else:
+                    super().generic_visit(node) #We need this for any nodes nested within the Call node   
             except Exception as e:
                 print (f'Warn: {e}')  #Expression could not be evaluated at compile time (can only happen at run time)        
-                super().generic_visit(node) #We need this for any nodes nested within the Call
+                
             return node
         else:
             super().generic_visit(node)
@@ -297,6 +300,18 @@ class Transformer(Parentage):
             or isinstance(node_iftest, ast.Tuple)
             or isinstance(node_iftest, ast.Set)
             or isinstance(node_iftest, ast.Dict)
+        ) 
+    
+    @staticmethod 
+    def is_primitive(val):
+        '''
+        Method for checking if a string value is of a primitive datatype - bool, int, float, str   
+        '''
+        return (
+            isinstance(val, bool)
+            or isinstance(val, int)
+            or isinstance(val, float)
+            or isinstance(val, str)
         ) 
 
     @staticmethod
@@ -586,6 +601,7 @@ print(1 or 2 and not not 0)
 
 print(bool(a))
 
+print (iter('i love python'.split()))
 '''
 def main():   
     '''
