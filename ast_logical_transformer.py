@@ -140,7 +140,7 @@ class Transformer(Parentage):
         gp = p.parent #Get the grandparent of the current If node
 
         node_name = self.get_Name('print', ast.Load())
-        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])  # node_call = self.get_Call((self.get_Name('bool', ast.Load())), [last_if.test])              
+        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])
         node_expr = self.get_Expr(node_call)
         node_expr.parent = p
 
@@ -171,7 +171,7 @@ class Transformer(Parentage):
         )
         return node_Assign
 
-    def get_If(self, if_test, if_body: list, if_orelse: list = []) -> ast.If:
+    def get_If(self, if_test: ast.AST, if_body: list, if_orelse: list = []) -> ast.If:
         '''
         Returns an ast.If node constructed using the specified parameters
         ''' 
@@ -179,8 +179,43 @@ class Transformer(Parentage):
             test = if_test,
             body = if_body,
             orelse = if_orelse
-        )
+        )        
         return node_If
+    
+    def get_control_node(self, node_control_type: ast.AST, 
+                        test: ast.AST = None,  body: list = [], orelse: list = [],
+                        handlers: list = [], finalbody: list = [], 
+                        exceptType: ast.AST = None, exceptName: str = '',
+                        target: ast.AST = None, iter: ast.AST = None,
+                        ) -> Any:
+        '''
+        Returns a control node (ast.(If|Try|While|For|ExceptHandler)) constructed using the specified parameters        
+        ''' 
+        node_control: ast.AST = None
+        match node_control_type:
+            case ast.If | ast.While:
+                node_control = node_control_type(
+                    test = test,
+                    body = body,
+                    orelse = orelse
+                )                
+            case ast.Try:
+                node_control = node_control_type(                    
+                    body = body,
+                    handlers = handlers,
+                    orelse = orelse,
+                    finalbody = finalbody
+                )                
+            case ast.ExceptHandler:
+                node_control = node_control_type(                    
+                    type = exceptType,
+                    name = exceptName,
+                    body = body                    
+                )   
+            case _:
+                raise SyntaxError(f'Unsupported node type {node_control_type}')            
+        return  node_control 
+
 
     def get_Compare(self, compare_left: ast.AST, compare_ops: list, compare_comparators: list) -> ast.Compare:
         '''
@@ -281,8 +316,8 @@ class Transformer(Parentage):
         if loper:            
             node_temp_var_name = self.get_Name(if_block_var_id, ast.Load())
             node_if_test = self.get_Compare(node_temp_var_name, [ast.Is()], [ast.Constant(value = False)]) #Add a line that checks if the temp bool is False - we only do the 'OR' part if it is
-            self.tmp_bool_access[if_block_var_id] = True
-            node_if = self.get_If(node_if_test, roper)
+            self.tmp_bool_access[if_block_var_id] = True           
+            node_if = self.get_control_node(ast.If, node_if_test, body=roper)
             roper = [node_if]                
         processed_list = loper + roper   
         return processed_list 
@@ -416,8 +451,8 @@ class Transformer(Parentage):
                 #Break down the BoolOps and then merge with additional 'not' statements
                 ...#node_If_list = self.merge_Not(new_Ifs, if_block_var_id) 
                 
-                #Keep the expression as-is for now        
-                node_if = self.get_If(node_if_test, [])  
+                #Keep the expression as-is for now                        
+                node_if = self.get_control_node(ast.If, test=node_if_test)
                 node_If_list.append(node_if)        
             else:
                 new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)        
@@ -427,8 +462,8 @@ class Transformer(Parentage):
                 node_ifnot_test = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
                 last_if.test = node_ifnot_test
                 node_If_list.append(last_if)
-        else:
-            node_if = self.get_If(node_if_test, [])
+        else:            
+            node_if = self.get_control_node(ast.If, test=node_if_test)
             node_If_list.append(node_if)
 
         return node_If_list
@@ -563,8 +598,8 @@ class Transformer(Parentage):
             ret_if = self.get_collapsed_if(nested_if, operands)   
         elif operands:            
             operands.append(node.test)
-            test = self.get_BoolOp(ast.And(), operands)
-            ret_if = self.get_If(test, node.body, node.orelse)
+            test = self.get_BoolOp(ast.And(), operands)            
+            ret_if = self.get_control_node(ast.If, test, node.body, node.orelse)
         else:            
             ret_if = node
         return ret_if    
