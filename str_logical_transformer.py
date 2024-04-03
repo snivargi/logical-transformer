@@ -45,18 +45,15 @@ while True:
         break
 if found is False:
     try:
-        iterable = iter(collection.split())
-    except:
-        iterable = iter(collection)
-    while True:
-        try:
+        iterable = iter(collection.split())    
+        while True:    
             iterator = next(iterable)
             if item == iterator:
                 found = True
                 break
-        except StopIteration:
-            break
-if  found is True:           
+    except:
+        pass
+if  found is True:            
 """
 
 block_num = 0
@@ -937,7 +934,7 @@ def main():
     '''
     Tests our code
     '''    
-    code = code1
+    code = code2
     print (code) 
     code_lines =  code.split('\n')    
     code_lines = remove_empty_lines(code_lines)
