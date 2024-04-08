@@ -32,7 +32,59 @@ class RemoveUnaccessed(ast.NodeTransformer):
             return None #Remove this node
         else:
             return node
-        
+
+class TransformerIn(ast.NodeTransformer):
+    '''
+    Transforms an AST by replacing the keyword 'in' while keeping the code logically consistent (original output unchanged)
+    '''   
+    ITERATION_IF_CODE = '''
+_found = False
+iterable = iter(collection)
+while True:
+    try:
+        iterator = next(iterable)
+        if item == iterator:
+            _found = True
+            break
+    except StopIteration:
+        break
+if _found is False:
+    try:
+        iterable = iter(collection.split())    
+        while True:    
+            iterator = next(iterable)
+            if item == iterator:
+                _found = True
+                break
+    except:
+        pass
+if _found is True:
+    ...           
+'''
+    def visit_If(self, node: ast.If) -> Any:
+        super().generic_visit(node)
+        if_w_replaced_in = self.replace_in(node)
+        return if_w_replaced_in
+    
+    def replace_in(self, node_if: ast.If) -> list:
+        if_test: ast.AST = node_if.test
+        if_body: list = node_if.body
+        if_orelse: list = node_if.orelse
+        processed_if: list = []                
+        if isinstance (if_test, ast.Compare) and isinstance(if_test.ops[0], ast.In): #We have an 'if' condition with 'in'           
+            item = ast.unparse(if_test.left)
+            collection = ast.unparse(if_test.comparators[0])
+            iter_lines = TransformerIn.ITERATION_IF_CODE.replace('item', item).replace('collection', collection) #Get the new code as a string            
+            iter_lines = ast.parse(iter_lines).body #Get the new code as an AST (the module body is a list)           
+            new_if:ast.If = iter_lines.pop()
+            new_if.body = if_body
+            new_if.orelse = if_orelse
+            processed_if = iter_lines + [new_if] 
+            #print (ast.unparse(processed_if))            
+        else:
+            processed_if.append(node_if)        
+        return processed_if
+
 class Transformer(Parentage):
     '''
     Transforms an AST using the specified option:
@@ -71,7 +123,7 @@ class Transformer(Parentage):
     '''      
     EXPAND = 'E'
     COLLAPSE = 'C'
-    tmp_bool_access = {} #Dictionary to track if the temp variable (for every 'if' block) has been accessed
+    tmp_bool_access = {} #Dictionary to track if the temp variable (for every 'if' block) has been accessed    
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
         '''
         Constructor for this transformer takes 2 optional arguments
@@ -340,7 +392,7 @@ class Transformer(Parentage):
     @staticmethod 
     def isprimitive(val):
         '''
-        Method for checking if a value is of a primitive datatype - bool, int, float, str   
+        Checks if a value is of a primitive datatype - bool, int, float, str   
         '''
         return (
             isinstance(val, bool)
@@ -637,6 +689,10 @@ print(1 or 2 and not not 0)
 print(bool(a))
 
 print (iter('i love python'.split()))
+
+if 2 in [1,2,3]:
+    if 'love' in 'i love python':
+        print ('word test passed')
 '''
 def main():   
     '''
@@ -647,9 +703,16 @@ def main():
     print(ast.dump(tree, indent='   '))
 
     #VISIT and TRANSFORM the AST    
+    
+    #Replace keywords 'else/elif/not/and/or in the code
     #new_tree = Transformer().visit(tree) 
     new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
     #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
+   
+    #Replace keyword 'in' in the new AST
+    new_tree = TransformerIn().visit(new_tree)
+   
+    #Add missing location info to the new nodes and display the new AST
     new_tree = ast.fix_missing_locations(new_tree)
     print(ast.dump(new_tree, indent='   '))
 
