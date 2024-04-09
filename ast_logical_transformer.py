@@ -5,9 +5,9 @@ from collections import deque
 class Parentage(ast.NodeTransformer):
     '''
     Adds and populates the 'parent' attribute for each node in the AST
+    This is so that the parent can be referenced from within a child if required
     '''      
-    parent = None
-
+    parent = None #New attribute to add to each node to reference the parent
     def visit(self, node: ast.AST):
         node.parent = self.parent
         self.parent = node
@@ -148,11 +148,17 @@ class Transformer(Parentage):
         print(f'leaving {node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}')      
         return node
 
-    # def visit_Module(self, node: ast.Module) -> Any:        
-    #     print(f'entering {node.__class__.__name__}')
-    #     print(f'parent node {node.parent.__class__.__name__}')
-    #     node.body = self.process_stmt_list((stmt for stmt in node.body))    
-    #     return node    
+    def visit_Module(self, node: ast.Module) -> Any: 
+        '''
+        Traverses a 'Module' node (along with its children)
+        Checks post-traversal if ast.Module.body has been pruned completely during traversal
+        If so, returns an Expr node since an empty module is NOT a valid AST
+        '''        
+        super().generic_visit(node)
+        if not (self.is_valid_body(node.body)):           
+            print (f'Entire Module pruned')
+            node.body.append(self.get_expr_node_pruned(None)) 
+        return node    
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         '''
@@ -163,7 +169,7 @@ class Transformer(Parentage):
         
         If eval fails, it returns the original node
         ''' 
-        if self.mode == self.EXPAND and len(node.args): #Only do this if we're trying to replace and/or/not/in    
+        if self.mode in (self.EXPAND, self.COLLAPSE) and len(node.args): #Only do this if we're trying to replace and/or/not/in    
             try:            
                 val = self.get_node_val(node.args[0])                   
                 if Transformer.isprimitive(val):
@@ -178,6 +184,15 @@ class Transformer(Parentage):
             super().generic_visit(node)
             return node
         
+    def get_expr_node_pruned(self, parent: ast.AST) -> ast.Expr:
+        '''
+        Returns an ast.Expr node to replace a pruned node
+        ''' 
+        node_name = self.get_Name('print', ast.Load())
+        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])
+        node_expr = self.get_Expr(node_call)
+        node_expr.parent = parent
+        return node_expr
 
     def visit_If(self, node: ast.If) -> Any:
         '''
@@ -190,26 +205,21 @@ class Transformer(Parentage):
         
         p = node.parent #Get the parent of the current If node
         gp = p.parent #Get the grandparent of the current If node
-
-        node_name = self.get_Name('print', ast.Load())
-        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])
-        node_expr = self.get_Expr(node_call)
-        node_expr.parent = p
-
+        
+        super().generic_visit(node)
         if self.mode == self.EXPAND:            
             processed_if = self.expand_if (node) #Break down this If node into its logical components
             if not processed_if:
                 print (f'Entire sub-tree {node_metadata} pruned')
-                processed_if.append(node_expr)
+                processed_if.append(self.get_expr_node_pruned(p))
             return  processed_if    
         elif self.mode == self.COLLAPSE:
             processed_if = self.collapse_if(node) #Roll up nested Ifs into a single ast.BoolOp (op=ast.And)            
             if not processed_if:
                 print (f'Entire sub-tree {node_metadata} pruned')
-                processed_if.append(node_expr)
+                processed_if.append(self.get_expr_node_pruned(p))
             return  processed_if    
-        else:    
-            super().generic_visit(node)
+        else:               
             return node
         
 
@@ -557,7 +567,15 @@ class Transformer(Parentage):
                 for stmt in value:
                     yield stmt        
 
-    
+    def is_valid_body(self, body: list) -> bool:
+        is_valid = True
+        try:
+            if not len(body) or (body[0].value.args[0].value=='<Node pruned>'):
+                is_valid = False 
+        except Exception as e:                          
+            #print (e)
+            pass
+        return is_valid    
 
     def expand_if(self, node: ast.If) -> list:
         '''
@@ -576,27 +594,21 @@ class Transformer(Parentage):
             if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
                 split = True #We will only split if the test has one of: and/or/not/elif/else
                 
-
-            #processed_body = self.process_stmt_list(node.body) #Process using list       
-            #processed_body = self.process_stmt_list((stmt for stmt in node.body))  #Process using in-line generator
-            processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
             
-            if processed_body:
-                #Process test and merge body               
+            if self.is_valid_body(node.body):
+                #Process if.test and merge if.body               
                 new_ifs = self.get_Ifs_AndOr(node.test, if_block_var_id) #Break down the (boolean ops) from test into its individual logical ops
-                if new_ifs: #If we have >=1 'if' statements merge the body with them, otherwise prune the entire branch
+                if new_ifs: #If we have >=1 'if' statements, merge the body with them, otherwise prune the entire branch
                     if split:
                         node_assign_if_pre = self.get_Assign([(self.get_Name(if_block_var_id, ast.Store()))], ast.Constant(value=False)) 
                         processed_if.append(node_assign_if_pre) #Initialise the bool variable for this IF node    
                         node_assign_if_post = self.get_Assign([(self.get_Name(if_block_var_id, ast.Store()))], ast.Constant(value=True)) 
-                        #processed_body.insert(0, node_assign_if)  #Prepend to list     
-                        processed_body.appendleft(node_assign_if_post)  #Prepend to deque                 
-                    processed_if.extend(self.merge_And(new_ifs, list(processed_body))) #Add the body to the new Ifs we got from breaking down the test
+                        node.body.insert(0, node_assign_if_post)  #Prepend to list
+                    processed_if.extend(self.merge_And(new_ifs, node.body)) #Add the body to the new Ifs we got from breaking down the test
 
-        #Process orelse                       
-        processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
-        if processed_orelse:     
-            processed_if = self.merge_Or(processed_if, list(processed_orelse), if_block_var_id)
+        #Process if.orelse                               
+        if  node.orelse:     
+            processed_if = self.merge_Or(processed_if,  node.orelse, if_block_var_id)
 
         if processed_if and isinstance(processed_if[0], ast.Assign) and not self.tmp_bool_access[if_block_var_id]:
             processed_if.pop(0)
@@ -625,16 +637,12 @@ class Transformer(Parentage):
                 node = None #Prune the 'if' part altogether           
                 
         if node:
-            #Process body      
-            processed_body = self.process_stmt_list(self.field_generator(node, 'body')) #Process using ast.iter_fields generator
-            if processed_body:
-                node.body = list(processed_body)
-                #Process orelse       
-                processed_orelse = self.process_stmt_list(self.field_generator(node, 'orelse'))            
-                node.orelse = list(processed_orelse)
-            else: #The entire 'body' has been pruned 
-                node = None #Can't have an if without a body, so prune the original if   
-            processed_if.append(node)            
+            #Process body                  
+            if self.is_valid_body(node.body):               
+                processed_if.append(node)            
+            else: #Not needed, but keeping it here to help clarify logic    
+                node = None #Can't have an if without a body, so prune the original if              
+            
         
         return processed_if
     
