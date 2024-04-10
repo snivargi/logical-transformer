@@ -57,3 +57,37 @@ if _found is True:
             pass
     if _found is True:
         print('word test passed')
+iterable0 = iter(range(2))
+while True:
+    try:
+        i = next(iterable0)
+    except StopIteration:
+        break
+    iterable4 = iter(range(2))
+    while True:
+        try:
+            j = next(iterable4)
+        except StopIteration:
+            break
+        _found = False
+        iterable = iter('i love python')
+        while True:
+            try:
+                iterator = next(iterable)
+                if 'love' == iterator:
+                    _found = True
+                    break
+            except StopIteration:
+                break
+        if _found is False:
+            try:
+                iterable = iter('i love python'.split())
+                while True:
+                    iterator = next(iterable)
+                    if 'love' == iterator:
+                        _found = True
+                        break
+            except:
+                pass
+        if _found is True:
+            print(f'[{i},{j}]')

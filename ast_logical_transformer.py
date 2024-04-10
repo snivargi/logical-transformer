@@ -36,13 +36,21 @@ class RemoveUnaccessed(ast.NodeTransformer):
 class TransformerIn(ast.NodeTransformer):
     '''
     Transforms an AST by replacing the keyword 'in' while keeping the code logically consistent (original output unchanged)
-    '''   
-    ITERATION_IF_CODE = '''
-_found = False
+    '''       
+    ITERATION_CODE = '''
 iterable = iter(collection)
 while True:
     try:
-        iterator = next(iterable)
+        iterator = next(iterable)    
+'''
+    ITERATION_FOR_CODE = f'''
+{ITERATION_CODE}
+    except StopIteration:
+        break    
+'''
+    ITERATION_IF_CODE = f'''
+_found = False
+{ITERATION_CODE}
         if item == iterator:
             _found = True
             break
@@ -61,12 +69,43 @@ if _found is False:
 if _found is True:
     ...           
 '''
-    def visit_If(self, node: ast.If) -> Any:
+    def visit_If(self, node: ast.If) -> list:
+        '''
+        Visits an 'if' node and its children to try to replace keyword 'in' in them
+        '''   
         super().generic_visit(node)
-        if_w_replaced_in = self.replace_in(node)
+        if_w_replaced_in = self.replace_in_if(node)
         return if_w_replaced_in
     
-    def replace_in(self, node_if: ast.If) -> list:
+    def visit_For(self, node: ast.For) -> list:
+        '''
+        Visits a 'for' node and its children to try to replace keyword 'in' in them
+        '''   
+        super().generic_visit(node)
+        for_w_replaced_in = self.replace_in_for(node)
+        return for_w_replaced_in
+    
+    def replace_in_for(self, node_for: ast.For) -> list:  
+        '''
+        Replaces the keyword 'in' where it appears with a 'for'
+        '''  
+        processed_for: list = []          
+        iterator = ast.unparse(node_for.target)
+        collection = ast.unparse(node_for.iter)
+        iter_lines = TransformerIn.ITERATION_FOR_CODE\
+                                .replace('iterator', iterator)\
+                                .replace('collection', collection)\
+                                .replace('iterable', f'iterable{node_for.col_offset}') #Get the new code as a string      
+        iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
+        node_while:ast.While = iter_lines.pop()
+        node_while.body.append(node_for.body)
+        processed_for = iter_lines + [node_while] 
+        return processed_for
+
+    def replace_in_if(self, node_if: ast.If) -> list:
+        '''
+        Replaces the keyword 'in' where it appears with an 'if'
+        '''   
         if_test: ast.AST = node_if.test
         if_body: list = node_if.body
         if_orelse: list = node_if.orelse
@@ -75,7 +114,7 @@ if _found is True:
             item = ast.unparse(if_test.left)
             collection = ast.unparse(if_test.comparators[0])
             iter_lines = TransformerIn.ITERATION_IF_CODE.replace('item', item).replace('collection', collection) #Get the new code as a string            
-            iter_lines = ast.parse(iter_lines).body #Get the new code as an AST (the module body is a list)           
+            iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
             new_if:ast.If = iter_lines.pop()
             new_if.body = if_body
             new_if.orelse = if_orelse
@@ -701,6 +740,12 @@ print (iter('i love python'.split()))
 if 2 in [1,2,3]:
     if 'love' in 'i love python':
         print ('word test passed')
+
+#2D Matrix (nested 'for') test        
+for i in range(2):
+    for j in range(2):
+        if 'love' in 'i love python':
+            print (f'[{i},{j}]') 
 '''
 def main():   
     '''
