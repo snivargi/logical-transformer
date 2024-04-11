@@ -80,6 +80,8 @@ if _found is True:
     def visit_For(self, node: ast.For) -> list:
         '''
         Visits a 'for' node and its children to try to replace keyword 'in' in them
+        The 'for' loop is replaced with a 'while' loop to achieve this
+        It uses an iter(<list>) object which allows the same functionality without the keyword 'in'
         '''   
         super().generic_visit(node)
         for_w_replaced_in = self.replace_in_for(node)
@@ -92,34 +94,82 @@ if _found is True:
         processed_for: list = []          
         iterator = ast.unparse(node_for.target)
         collection = ast.unparse(node_for.iter)
-        iter_lines = TransformerIn.ITERATION_FOR_CODE\
-                                .replace('iterator', iterator)\
-                                .replace('collection', collection)\
-                                .replace('iterable', f'iterable{node_for.col_offset}') #Get the new code as a string      
+        iter_lines = TransformerIn.ITERATION_FOR_CODE
+        replace_dict = {
+            'iterator': iterator, 
+            'collection': collection, 
+            'iterable': f'iterable{node_for.col_offset}'
+        }            
+        iter_lines = TransformerIn.str_multi_replace(iter_lines, replace_dict) #Get the new code as a string     
         iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
         node_while:ast.While = iter_lines.pop()
         node_while.body.append(node_for.body)
         processed_for = iter_lines + [node_while] 
         return processed_for
+    
+    @staticmethod
+    def str_multi_replace(old: str, replace_dict: dict) -> str:                
+        '''
+        Performs multiple replacements (specified as a dict) in target string
+        '''  
+        for k, v in replace_dict.items():
+            old = old.replace(k, v)
+        return old
+
+    def get_comparators(self, node_compare: ast.Compare) -> tuple:
+        '''
+        Gets comparators from a compare node as a tuple
+        We're specifically calling this for those nodes that have ast.(Not)?In as ast.Compare.ops[0] 
+        e.g. '1 in [1, 2, 3]'  returns '1' as the item and '[1, 2, 3]' as the collection (list)
+        ''' 
+        item = ast.unparse(node_compare.left) 
+        collection = ast.unparse(node_compare.comparators[0])
+        return (item, collection)
+    
+    def get_iter_code_from_compare(self, node_compare: ast.Compare, negated: bool = False) -> list:
+        '''
+        Creates a new AST code object after replacing the keyword 'in' from a compare node
+        ''' 
+        item, collection = self.get_comparators(node_compare)   
+        iter_lines = TransformerIn.ITERATION_IF_CODE
+        if (
+                isinstance(node_compare.ops[0], ast.In) and negated) \
+                or (isinstance(node_compare.ops[0], ast.NotIn) and not negated): #e.g. 'not 1 in [1, 2, 3]' or '1 not in [1, 2, 3]'            
+            replace_dict = {'item': item, 'collection': collection, 'is True': 'is False'}            
+            iter_lines = TransformerIn.str_multi_replace(iter_lines, replace_dict)
+        else:  #e.g. '1 in [1, 2, 3]' ; 'not 1 not in [1, 2, 3]'               
+            replace_dict = {'item': item, 'collection': collection}            
+            iter_lines = TransformerIn.str_multi_replace(iter_lines, replace_dict)
+        iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
+        return iter_lines
+
+
+    def get_iter_code_from_if(self, if_test: ast.AST) -> list:
+        '''
+        Checks if the ast.If.test node is an ast.Compare with ast.(Not)?In as ast.Compare.ops[0]
+        If so, replaces the keyword 'in' and returns a new AST code object
+        ''' 
+        iter_lines: list = []
+        if isinstance (if_test, ast.UnaryOp) and isinstance(if_test.op, ast.Not):
+            if isinstance(if_test.operand, ast.Compare) and isinstance(if_test.operand.ops[0], (ast.In, ast.NotIn)):                                
+                iter_lines = self.get_iter_code_from_compare(if_test.operand, True)
+        elif isinstance (if_test, ast.Compare) and isinstance(if_test.ops[0], (ast.In, ast.NotIn)):
+                iter_lines = self.get_iter_code_from_compare(if_test)            
+        return iter_lines        
+    
 
     def replace_in_if(self, node_if: ast.If) -> list:
         '''
         Replaces the keyword 'in' where it appears with an 'if'
-        '''   
-        if_test: ast.AST = node_if.test
-        if_body: list = node_if.body
-        if_orelse: list = node_if.orelse
-        processed_if: list = []                
-        if isinstance (if_test, ast.Compare) and isinstance(if_test.ops[0], ast.In): #We have an 'if' condition with 'in'           
-            item = ast.unparse(if_test.left)
-            collection = ast.unparse(if_test.comparators[0])
-            iter_lines = TransformerIn.ITERATION_IF_CODE.replace('item', item).replace('collection', collection) #Get the new code as a string            
-            iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
+        e.g. 'if x in <list>' is replaced with a 'while' loop that uses an iter(<list>) object for the check
+        '''          
+        processed_if: list = []     
+        iter_lines = self.get_iter_code_from_if(node_if.test)
+        if iter_lines:         
             new_if:ast.If = iter_lines.pop()
-            new_if.body = if_body
-            new_if.orelse = if_orelse
-            processed_if = iter_lines + [new_if] 
-            #print (ast.unparse(processed_if))            
+            new_if.body = node_if.body
+            new_if.orelse = node_if.orelse
+            processed_if = iter_lines + [new_if]         
         else:
             processed_if.append(node_if)        
         return processed_if
@@ -744,7 +794,7 @@ if 2 in [1,2,3]:
 #2D Matrix (nested 'for') test        
 for i in range(2):
     for j in range(2):
-        if 'love' in 'i love python':
+        if 'x' not in 'i love python':
             print (f'[{i},{j}]') 
 '''
 def main():   
@@ -752,36 +802,42 @@ def main():
     Tests our code
     '''    
     #READ and PARSE the code, generate an AST
-    tree = ast.parse(code1)
-    print(ast.dump(tree, indent='   '))
+    try:
+        tree = ast.parse(code1)
+        new_tree = None #variable to store transformed AST
+        print(ast.dump(tree, indent='   '))
 
-    #VISIT and TRANSFORM the AST    
+
+        #VISIT and TRANSFORM the AST    
+        
+        #Replace keywords 'else/elif/not/and/or in the code
+        #new_tree = Transformer().visit(tree) 
+        new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
+        #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
     
-    #Replace keywords 'else/elif/not/and/or in the code
-    #new_tree = Transformer().visit(tree) 
-    new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
-    #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
-   
-    #Replace keyword 'in' in the new AST
-    new_tree = TransformerIn().visit(new_tree)
-   
-    #Add missing location info to the new nodes and display the new AST
-    new_tree = ast.fix_missing_locations(new_tree)
-    print(ast.dump(new_tree, indent='   '))
+        #Replace keyword 'in' in the new AST
+        new_tree = TransformerIn().visit(new_tree) if new_tree else TransformerIn().visit(tree)
+    
+        #Add missing location info to the new nodes and display the new AST
+        new_tree = ast.fix_missing_locations(new_tree)
+        print(ast.dump(new_tree, indent='   '))
 
-    #UNPARSE the transformed AST and VIEW new code 
-    new_code = ast.unparse(new_tree)
-    print(new_code)
+        #UNPARSE the transformed AST and VIEW new code 
+        new_code = ast.unparse(new_tree)
+        print(new_code)
 
-    #WRITE new code to file
-    with open('ast_transformed_code.py', 'w') as f:
-            f.write(new_code)  
+        #WRITE new code to file
+        with open('ast_transformed_code.py', 'w') as f:
+                f.write(new_code)  
 
-    #COMPILE the new AST into a binary object        
-    # code_object = compile(new_tree, '', 'exec')
+        #COMPILE the new AST into a binary object        
+        # code_object = compile(new_tree, '', 'exec')
 
-    #EXECUTE the code in the binary object        
-    # exec(code_object)
+        #EXECUTE the code in the binary object        
+        # exec(code_object)
+    except Exception as e:
+        print (f'{type(e).__name__} occurred during AST transformation: {e}')
+    
             
 if __name__ == '__main__':    
     main()            

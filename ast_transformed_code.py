@@ -74,7 +74,7 @@ while True:
         while True:
             try:
                 iterator = next(iterable)
-                if 'love' == iterator:
+                if 'x' == iterator:
                     _found = True
                     break
             except StopIteration:
@@ -84,10 +84,10 @@ while True:
                 iterable = iter('i love python'.split())
                 while True:
                     iterator = next(iterable)
-                    if 'love' == iterator:
+                    if 'x' == iterator:
                         _found = True
                         break
             except:
                 pass
-        if _found is True:
+        if _found is False:
             print(f'[{i},{j}]')
