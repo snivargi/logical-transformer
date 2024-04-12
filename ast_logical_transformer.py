@@ -36,39 +36,54 @@ class RemoveUnaccessed(ast.NodeTransformer):
 class TransformerIn(ast.NodeTransformer):
     '''
     Transforms an AST by replacing the keyword 'in' while keeping the code logically consistent (original output unchanged)
-    '''       
-    ITERATION_CODE = '''
+    '''      
+    is_iter_func_reqd = False  #Flag to check if a FunctionDef is required for an if-in construct
+    #Code snippet to insert for if-in, for-in constructs
+    ITERATION_CODE = '''  
 iterable = iter(collection)
 while True:
     try:
         iterator = next(iterable)    
-'''
+''' 
+    #Code snippet to insert for a for-in construct   
     ITERATION_FOR_CODE = f'''
 {ITERATION_CODE}
     except StopIteration:
         break    
 '''
+    ITERATION_DEF_CODE = ITERATION_CODE.replace('\n','\n    ') #Add extra indent to the code since it will be embedded in a func    
+    #Code snippet to insert for an if-in construct   
     ITERATION_IF_CODE = f'''
-_found = False
-{ITERATION_CODE}
-        if item == iterator:
-            _found = True
-            break
-    except StopIteration:
-        break
-if _found is False:
-    try:
-        iterable = iter(collection.split())    
-        while True:    
-            iterator = next(iterable)
+def _isItemInIter(item, collection, check = True):    
+    found = False
+    {ITERATION_DEF_CODE}
             if item == iterator:
-                _found = True
+                found = True
                 break
-    except:
-        pass
-if _found is True:
-    ...           
+        except StopIteration:
+            break
+    if found is False:
+        try:
+            iterable = iter(collection.split())    
+            while True:    
+                iterator = next(iterable)
+                if item == iterator:
+                    found = True
+                    break
+        except:
+            pass
+    return found if check else not found        
 '''
+    def visit_Module(self, node: ast.Module) -> Any:   
+        '''
+        Traverse the AST and insert an ast.FunctionDef if called for
+        '''      
+        super().generic_visit(node)
+        if self.is_iter_func_reqd:            
+            iter_func: list = ast.parse(self.ITERATION_IF_CODE).body #Add function def           
+            node.body.insert(self.get_loc_iter(node.body), iter_func)
+        return node    
+    
     def visit_If(self, node: ast.If) -> list:
         '''
         Visits an 'if' node and its children to try to replace keyword 'in' in them
@@ -87,6 +102,14 @@ if _found is True:
         for_w_replaced_in = self.replace_in_for(node)
         return for_w_replaced_in
     
+    def get_loc_iter(self, stmt_list: list) -> int:
+        '''
+        Returns the first line where a new FunctionDef can be inserted (i.e., after any imports)
+        ''' 
+        for i in range(len(stmt_list)):
+            if not isinstance(stmt_list[i], (ast.Import, ast.ImportFrom)):
+                return i
+
     def replace_in_for(self, node_for: ast.For) -> list:  
         '''
         Replaces the keyword 'in' where it appears with a 'for'
@@ -94,7 +117,7 @@ if _found is True:
         processed_for: list = []          
         iterator = ast.unparse(node_for.target)
         collection = ast.unparse(node_for.iter)
-        iter_lines = TransformerIn.ITERATION_FOR_CODE
+        iter_lines = self.ITERATION_FOR_CODE
         replace_dict = {
             'iterator': iterator, 
             'collection': collection, 
@@ -134,12 +157,10 @@ if _found is True:
         iter_lines = TransformerIn.ITERATION_IF_CODE
         if (
                 isinstance(node_compare.ops[0], ast.In) and negated) \
-                or (isinstance(node_compare.ops[0], ast.NotIn) and not negated): #e.g. 'not 1 in [1, 2, 3]' or '1 not in [1, 2, 3]'            
-            replace_dict = {'item': item, 'collection': collection, 'is True': 'is False'}            
-            iter_lines = TransformerIn.str_multi_replace(iter_lines, replace_dict)
-        else:  #e.g. '1 in [1, 2, 3]' ; 'not 1 not in [1, 2, 3]'               
-            replace_dict = {'item': item, 'collection': collection}            
-            iter_lines = TransformerIn.str_multi_replace(iter_lines, replace_dict)
+                or (isinstance(node_compare.ops[0], ast.NotIn) and not negated): #e.g. 'not 1 in [1, 2, 3]' or '1 not in [1, 2, 3]'                      
+            iter_lines = f'_isItemInIter({item}, {collection}, False)'
+        else:  #e.g. '1 in [1, 2, 3]' ; 'not 1 not in [1, 2, 3]'                           
+            iter_lines = f'_isItemInIter({item}, {collection}, True)'
         iter_lines = ast.parse(iter_lines).body #Turn the new code back into an AST (the module body is a list)
         return iter_lines
 
@@ -165,13 +186,10 @@ if _found is True:
         '''          
         processed_if: list = []     
         iter_lines = self.get_iter_code_from_if(node_if.test)
-        if iter_lines:         
-            new_if:ast.If = iter_lines.pop()
-            new_if.body = node_if.body
-            new_if.orelse = node_if.orelse
-            processed_if = iter_lines + [new_if]         
-        else:
-            processed_if.append(node_if)        
+        if iter_lines:                    
+            node_if.test = iter_lines[0].value                                 
+            self.is_iter_func_reqd = True #We need to insert a function that does the if-in check without using in
+        processed_if.append(node_if)        
         return processed_if
 
 class Transformer(Parentage):
@@ -657,6 +675,9 @@ class Transformer(Parentage):
                     yield stmt        
 
     def is_valid_body(self, body: list) -> bool:
+        '''
+        Checks if the body of a node is empty
+        '''
         is_valid = True
         try:
             if not len(body) or (body[0].value.args[0].value=='<Node pruned>'):
@@ -760,6 +781,8 @@ else:
     print (False)      
 '''
 code1 = '''
+import collections
+from operator import contains
 a = ''
 if  "False" or 1 and True:
     print (True)

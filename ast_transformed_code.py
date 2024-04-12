@@ -1,3 +1,28 @@
+import collections
+from operator import contains
+
+def _isItemInIter(item, collection, check=True):
+    found = False
+    iterable = iter(collection)
+    while True:
+        try:
+            iterator = next(iterable)
+            if item == iterator:
+                found = True
+                break
+        except StopIteration:
+            break
+    if found is False:
+        try:
+            iterable = iter(collection.split())
+            while True:
+                iterator = next(iterable)
+                if item == iterator:
+                    found = True
+                    break
+        except:
+            pass
+    return found if check else not found
 a = ''
 _boolIf0 = False
 if 'False':
@@ -14,48 +39,8 @@ print(-1073741824.0)
 print(1)
 print(bool(a))
 print(iter('i love python'.split()))
-_found = False
-iterable = iter([1, 2, 3])
-while True:
-    try:
-        iterator = next(iterable)
-        if 2 == iterator:
-            _found = True
-            break
-    except StopIteration:
-        break
-if _found is False:
-    try:
-        iterable = iter([1, 2, 3].split())
-        while True:
-            iterator = next(iterable)
-            if 2 == iterator:
-                _found = True
-                break
-    except:
-        pass
-if _found is True:
-    _found = False
-    iterable = iter('i love python')
-    while True:
-        try:
-            iterator = next(iterable)
-            if 'love' == iterator:
-                _found = True
-                break
-        except StopIteration:
-            break
-    if _found is False:
-        try:
-            iterable = iter('i love python'.split())
-            while True:
-                iterator = next(iterable)
-                if 'love' == iterator:
-                    _found = True
-                    break
-        except:
-            pass
-    if _found is True:
+if _isItemInIter(2, [1, 2, 3], True):
+    if _isItemInIter('love', 'i love python', True):
         print('word test passed')
 iterable0 = iter(range(2))
 while True:
@@ -69,25 +54,5 @@ while True:
             j = next(iterable4)
         except StopIteration:
             break
-        _found = False
-        iterable = iter('i love python')
-        while True:
-            try:
-                iterator = next(iterable)
-                if 'x' == iterator:
-                    _found = True
-                    break
-            except StopIteration:
-                break
-        if _found is False:
-            try:
-                iterable = iter('i love python'.split())
-                while True:
-                    iterator = next(iterable)
-                    if 'x' == iterator:
-                        _found = True
-                        break
-            except:
-                pass
-        if _found is False:
+        if _isItemInIter('x', 'i love python', False):
             print(f'[{i},{j}]')
