@@ -450,18 +450,39 @@ class Transformer(Parentage):
     def merge_Not(self, lroper: list, if_block_var_id: str) -> list:  
         '''
         Wrap an operand within the  NOT operator
-        '''      
-        processed_list = []
-        last_if: ast.If = lroper.pop()
-        last_if.body = ast.Pass() #If the condition is True, do nothing (pass)
-        lroper.append(last_if)
-        processed_list =  self.merge_Or(lroper, [], if_block_var_id) #Add provision to execute where condition is False
+
+        e.g.
+         
+        'not (a and b)' is wrapped logically into: 
+        if a:
+            if b:
+                <a & b> = True
+        if <a & b> is False:
+            ...
+
+        'not (a or b)' is wrapped logically into: 
+        if a:
+            <a> = True
+        if <a> is False:
+            if b:
+                <b> = True
+        if <a | b> is True:
+            ...
+        '''     
+        node_assign = self.get_Assign([(self.get_Name(if_block_var_id, ast.Store()))], ast.Constant(value=True))  
+        processed_list =self.merge_And(lroper, [node_assign])  
+        processed_list = self.merge_Or(processed_list, [], if_block_var_id) #Add provision to execute where condition is False (i.e. not True)                                    
         return processed_list 
 
 
     def merge_And(self, loper: list, roper: list) -> list:
         '''
-        Join/merge left and right operands with the AND operator    
+        Join/merge left and right operands with the AND operator  
+        
+        e.g. 'if a' and 'if b' are merged as: 
+        if a:
+            if b:
+                ...
         '''
         processed_list = []
         if loper:
@@ -479,6 +500,13 @@ class Transformer(Parentage):
     def merge_Or(self, loper: list, roper: list, if_block_var_id: str) -> list:
         '''
         Join/merge left and right operands with the OR operator    
+
+        e.g. 'if a' or 'if b' are merged as: 
+        if a:
+            ...
+        if <a> is False:
+            if b:
+                ...
         '''
         processed_list = []
         node_if: ast.If
@@ -615,14 +643,15 @@ class Transformer(Parentage):
                 elif isinstance(node_if_test.op, ast.And):                                        
                     node_If_list = self.merge_And(node_If_list, new_Ifs)                    
         elif isinstance(node_if_test, ast.UnaryOp) and isinstance(node_if_test.op, ast.Not): #unary boolean                                    
-            if isinstance(node_if_test.operand, ast.BoolOp): #Negation of bracketed boolean expressions more complex than initially anticipated   
-                #ToDo: 
-                #Break down the BoolOps and then merge with additional 'not' statements
-                ...#node_If_list = self.merge_Not(new_Ifs, if_block_var_id) 
-                
-                #Keep the expression as-is for now                        
-                node_if = self.get_control_node(ast.If, test=node_if_test)
-                node_If_list.append(node_if)        
+            if isinstance(node_if_test.operand, ast.BoolOp): #Negation of boolean expressions
+                #Break down the BoolOps
+                new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)
+                #Then merge with additional 'not' statements
+                node_If_list = self.merge_Not(new_Ifs, if_block_var_id) 
+
+                #To keep the expression as-is:                        
+                # node_if = self.get_control_node(ast.If, test=node_if_test)
+                # node_If_list.append(node_if)        
             else:
                 new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)        
                 last_if: ast.If = new_Ifs[-1] 
@@ -783,7 +812,12 @@ else:
 code1 = '''
 import collections
 from operator import contains
-a = ''
+a = b= c= ''
+if not ((a or b) and c):
+    print ('Not test passed')
+else:
+    print ('Not test failed')
+
 if  "False" or 1 and True:
     print (True)
     if 0 or isinstance(a, str) and 1:

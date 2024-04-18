@@ -23,7 +23,20 @@ def _isItemInIter(item, collection, check=True):
         except:
             pass
     return found if check else not found
-a = ''
+a = b = c = ''
+_boolIf0 = False
+if a:
+    if c:
+        _boolIf0 = True
+if _boolIf0 is False:
+    if b:
+        if c:
+            _boolIf0 = True
+if _boolIf0 is False:
+    _boolIf0 = True
+    print('Not test passed')
+if _boolIf0 is False:
+    print('Not test failed')
 _boolIf0 = False
 if 'False':
     _boolIf0 = True
