@@ -1,30 +1,30 @@
 x=50
-bool_IF_result0 = False
+_boolIf0 = False
 if x > 100:
-    bool_IF_result0 = True
+    _boolIf0 = True
     print ("if1")
-if bool_IF_result0 is False:
+if _boolIf0 is False:
     if x > 30:
         if x > 70:
-            bool_IF_result0 = True
+            _boolIf0 = True
             print ("if1")
-        if bool_IF_result0 is False:
+        if _boolIf0 is False:
             if x < 60:
-                bool_IF_result0 = True
+                _boolIf0 = True
                 print ("if1")
-if bool_IF_result0 is False:
+if _boolIf0 is False:
     if x > 40:
-        bool_IF_result0 = True
+        _boolIf0 = True
         print ("elif1")
-if bool_IF_result0 is False:
+if _boolIf0 is False:
     if (x < 40):
-        bool_IF_result0 = True
-        bool_IF_result4 = False
+        _boolIf0 = True
+        _boolIf4 = False
         if x > 30:
             if x <40:
-                bool_IF_result4 = True
+                _boolIf4 = True
                 print ("elif2if2")    
-if bool_IF_result0 is False:
+if _boolIf0 is False:
     print ("else1")
 list1 = ["a", "b" , "c"]
 list2 = [1, 2, 3]
@@ -80,118 +80,118 @@ iterable = iter('i love python')
 while True:
     try:
         iterator = next(iterable)
-        bool_IF_result8 = False
+        _boolIf8 = False
         if 'love' == iterator:
-            bool_IF_result8 = True
+            _boolIf8 = True
             found = True
             break
     except StopIteration:
         break
-bool_IF_result0 = False
+_boolIf0 = False
 if found is False:
-    bool_IF_result0 = True
+    _boolIf0 = True
     try:
         iterable = iter('i love python'.split())    
         while True:    
             iterator = next(iterable)
-            bool_IF_result12 = False
+            _boolIf12 = False
             if 'love' == iterator:
-                bool_IF_result12 = True
+                _boolIf12 = True
                 found = True
                 break
     except:
         pass
-bool_IF_result0 = False
+_boolIf0 = False
 if  found is True:            
-    bool_IF_result0 = True
+    _boolIf0 = True
     print ('word test passed')
 found = False
 iterable = iter(list1)
 while True:
     try:
         iterator = next(iterable)
-        bool_IF_result8 = False
+        _boolIf8 = False
         if 'a' == iterator:
-            bool_IF_result8 = True
+            _boolIf8 = True
             found = True
             break
     except StopIteration:
         break
-bool_IF_result0 = False
+_boolIf0 = False
 if found is False:
-    bool_IF_result0 = True
+    _boolIf0 = True
     try:
         iterable = iter(list1.split())    
         while True:    
             iterator = next(iterable)
-            bool_IF_result12 = False
+            _boolIf12 = False
             if 'a' == iterator:
-                bool_IF_result12 = True
+                _boolIf12 = True
                 found = True
                 break
     except:
         pass
-bool_IF_result0 = False
+_boolIf0 = False
 if  found is True:            
-    bool_IF_result0 = True
+    _boolIf0 = True
     print ('a exists!')
 found = False
 iterable = iter(list1)
 while True:
     try:
         iterator = next(iterable)
-        bool_IF_result8 = False
+        _boolIf8 = False
         if'x' == iterator:
-            bool_IF_result8 = True
+            _boolIf8 = True
             found = True
             break
     except StopIteration:
         break
-bool_IF_result0 = False
+_boolIf0 = False
 if found is False:
-    bool_IF_result0 = True
+    _boolIf0 = True
     try:
         iterable = iter(list1.split())    
         while True:    
             iterator = next(iterable)
-            bool_IF_result12 = False
+            _boolIf12 = False
             if'x' == iterator:
-                bool_IF_result12 = True
+                _boolIf12 = True
                 found = True
                 break
     except:
         pass
-bool_IF_result0 = False
+_boolIf0 = False
 if  found is False:            
-    bool_IF_result0 = True
+    _boolIf0 = True
     print ('x does not exist!')    
 found = False
 iterable = iter(list1)
 while True:
     try:
         iterator = next(iterable)
-        bool_IF_result8 = False
+        _boolIf8 = False
         if 'z'== iterator:
-            bool_IF_result8 = True
+            _boolIf8 = True
             found = True
             break
     except StopIteration:
         break
-bool_IF_result0 = False
+_boolIf0 = False
 if found is False:
-    bool_IF_result0 = True
+    _boolIf0 = True
     try:
         iterable = iter(list1.split())    
         while True:    
             iterator = next(iterable)
-            bool_IF_result12 = False
+            _boolIf12 = False
             if 'z'== iterator:
-                bool_IF_result12 = True
+                _boolIf12 = True
                 found = True
                 break
     except:
         pass
-bool_IF_result0 = False
+_boolIf0 = False
 if  found is False:            
-    bool_IF_result0 = True
+    _boolIf0 = True
     print ('z does not exist!')

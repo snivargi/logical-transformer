@@ -21,6 +21,7 @@ REGEX_FOR_IN = "^(\s*)for\s+(.+)\s+in\s+(.+)\s*:"
 REGEX_VAR_ASSIGNMENT = "(\w+)\s*=\s*(.)"
 VAR_TYPES = ('(','[','{','"',"'") #Tuple, List, Dictionary, String
 IF_RESULT_COUNTER = 'L' #Use L for (indentation)Level, B for Block(identifier)
+TMP_IF_RES = '_boolIf' #Temp variable for storing results of if tests
 
 
 ITERATION_CODE = """
@@ -153,6 +154,12 @@ if not (True==False) and not (0 == 1):
 
 if not  True==False :
     print ('True!=False')
+
+a = b= c= ''
+if not ((a or b) and c):
+    print ('Not test passed')
+else:
+    print ('Not test failed')    
 
 counter = 0
 while not(counter >= 3 and counter <= 7):
@@ -449,10 +456,10 @@ def merge_and(loper, roper, level, block):
     Join/merge left and right operands with the AND operator    
     '''
     if(len(loper)==1): #Base case
-        if(loper[0].strip()=='pass'):
+        if(loper[0].strip()=='pass' or re.match(f'\s*{TMP_IF_RES}', loper[0])):
             return loper
         else:    
-            match = re.search('^\s*', loper[0])  #find the first "word" in the line         
+            match = re.match('\s*', loper[0])  #find the first "word" in the line         
             if match:
                 spacing = match.group()            
                 return  loper + indent_code(roper, f'{spacing}    ') #We merge the right operand for this block and return  
@@ -500,12 +507,14 @@ def merge_and(loper, roper, level, block):
 
     return   main_block_processed_lines
     
+def get_tmp_if_var(level, block):
+    return  f'{TMP_IF_RES}{block}' if IF_RESULT_COUNTER == 'B' else f'{TMP_IF_RES}{level}'
 
 def merge_or(loper, roper, level, block):
     '''
     Join/merge left and right operands with the OR operator    
     '''
-    boolif = f'bool_IF_result{block}' if IF_RESULT_COUNTER == 'B' else f'bool_IF_result{level}'
+    boolif = get_tmp_if_var(level, block)
     boolifLine = [f'if {boolif} is False:']
     if len(roper)>0:
         roper = boolifLine + indent_code(roper, '    ')
@@ -517,11 +526,12 @@ def merge_not(lroper, level, block):
     '''
     Wrap an operand within the  NOT operator
     '''
-    # match = re.search('^\s*', lroper[-1])  #find the first "word" in the last line         
+    # match = re.match('\s*', lroper[-1])  #find the first "word" in the last line         
     # if match:
     #     spacing = match.group()        
     # lroper.append(f'{spacing}    pass') #If the condition is True, do nothing (pass)
-    lroper = merge_and(lroper, ['pass'], 0, 0)
+    boolif = get_tmp_if_var(level, block)
+    lroper = merge_and(lroper, [f'{boolif} = True'], 0, 0)
     lroper = merge_or(lroper, [], level, block) #Add provision to execute where condition is False
     return lroper
 
@@ -741,9 +751,10 @@ def parse_expr (expr, level = 0, block =0, if_expr = False):
                         #----Handle NOT-----------
                         if 'not' in cond:
                             if (re.search(r'\b(and|or)\b', part_expr)): #Negation of bracketed boolean expressions more complex than initially anticipated                            
-                                ... #loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True) #Parse expression without 'not' first
-                                ... #loper = merge_not(loper, level, block) #Then attempt to merge with additional 'not' statements
-                                loper.append (f'{cond} ({part_expr}):')  #Keep the expression as-is for now                     
+                                loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True) #Parse expression without 'not' first
+                                loper = merge_not(loper, level, block) #Then merge with additional 'not' statements
+
+                                #loper.append (f'{cond} ({part_expr}):')  #Keep the expression as-is for now                     
                             else:
                                 loper = parse_expr (cond.replace('not','').strip() + ' ' + part_expr, level, block, if_expr=True)#Recursive call to get left operand from the expression within brackets                                                                
                                 loper[-1] = re.sub('^if\s+','if False == bool(', loper[-1].replace(':','')) + '):'                                
@@ -893,12 +904,12 @@ def replace_and_or(expr_line, lines, level, block):
     For given 'if' block, replaces the keywords: and, or
     These are replaced with individual 'if' blocks while ensuring the code output remains unchanged
     '''  
-    boolif = f'bool_IF_result{block}' if IF_RESULT_COUNTER == 'B' else f'bool_IF_result{level}'
+    boolif = get_tmp_if_var(level, block)
     expr_lines = []    
     parsed_expr_lines= []
     merged_code = []
     spacing = '' 
-    match = re.search('^(\s*)(\w+)', expr_line)  #find the first "word" in the line 
+    match = re.match('(\s*)(\w+)', expr_line)  #find the first "word" in the line 
     if match:
         spacing = match.group(1)
         cond = match.group(2)
