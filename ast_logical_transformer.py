@@ -107,7 +107,8 @@ def _isItemInIter(item, collection, check = True):
         Returns the first line where a new FunctionDef can be inserted (i.e., after any imports)
         ''' 
         for i in range(len(stmt_list)):
-            if not isinstance(stmt_list[i], (ast.Import, ast.ImportFrom)):
+            stmt = stmt_list[i]
+            if not isinstance(stmt, (ast.Import, ast.ImportFrom)):            
                 return i
 
     def replace_in_for(self, node_for: ast.For) -> list:  
@@ -165,17 +166,17 @@ def _isItemInIter(item, collection, check = True):
         return iter_lines
 
 
-    def get_iter_code_from_if(self, if_test: ast.AST) -> list:
+    def get_iter_code_from_test(self, test: ast.AST) -> list:
         '''
         Checks if the ast.If.test node is an ast.Compare with ast.(Not)?In as ast.Compare.ops[0]
         If so, replaces the keyword 'in' and returns a new AST code object
         ''' 
         iter_lines: list = []
-        if isinstance (if_test, ast.UnaryOp) and isinstance(if_test.op, ast.Not):
-            if isinstance(if_test.operand, ast.Compare) and isinstance(if_test.operand.ops[0], (ast.In, ast.NotIn)):                                
-                iter_lines = self.get_iter_code_from_compare(if_test.operand, True)
-        elif isinstance (if_test, ast.Compare) and isinstance(if_test.ops[0], (ast.In, ast.NotIn)):
-                iter_lines = self.get_iter_code_from_compare(if_test)            
+        if isinstance (test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            if isinstance(test.operand, ast.Compare) and isinstance(test.operand.ops[0], (ast.In, ast.NotIn)):                                
+                iter_lines = self.get_iter_code_from_compare(test.operand, True)
+        elif isinstance (test, ast.Compare) and isinstance(test.ops[0], (ast.In, ast.NotIn)):
+                iter_lines = self.get_iter_code_from_compare(test)            
         return iter_lines        
     
 
@@ -185,7 +186,7 @@ def _isItemInIter(item, collection, check = True):
         e.g. 'if x in <list>' is replaced with a 'while' loop that uses an iter(<list>) object for the check
         '''          
         processed_if: list = []     
-        iter_lines = self.get_iter_code_from_if(node_if.test)
+        iter_lines = self.get_iter_code_from_test(node_if.test)
         if iter_lines:                    
             node_if.test = iter_lines[0].value                                 
             self.is_iter_func_reqd = True #We need to insert a function that does the if-in check without using in
@@ -246,13 +247,10 @@ class Transformer(Parentage):
         '''
         Prints traversal info of nodes within the AST
         '''    
-        try:        
-            line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
-        except Exception:
-            line_info = ''
-        print(f'entering {node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}')              
+        node_metadata = self.get_node_metadata(node)   
+        print(f'entering {node_metadata}')              
         super().generic_visit(node)
-        print(f'leaving {node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}')      
+        print(f'leaving {node_metadata}')      
         return node
 
     def visit_Module(self, node: ast.Module) -> Any: 
@@ -306,8 +304,7 @@ class Transformer(Parentage):
         Transforms an 'if' node (along with its children) encountered while traversing an AST
         ''' 
         processed_if = []
-        line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'        
-        node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
+        node_metadata = self.get_node_metadata(node)   
         print(f'entering {node_metadata}')  
         
         p = node.parent #Get the parent of the current If node
@@ -329,6 +326,48 @@ class Transformer(Parentage):
         else:               
             return node
         
+    def get_node_metadata(self, node: ast.AST) -> str:
+        '''
+        Returns info about a node such as lineno, col_offset, parent node
+        ''' 
+        try:        
+            line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
+        except Exception:
+            line_info = ''        
+        node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
+        return node_metadata
+    
+    def visit_While(self, node: ast.While) -> list:
+        '''
+        Transforms a 'while' node (along with its children) encountered while traversing an AST         
+        ''' 
+        processed_while = []
+        node_metadata = self.get_node_metadata(node)
+        print(f'entering {node_metadata}')  
+        super().generic_visit(node)
+        if not (self.is_valid_body(node.body)):           
+            print (f'Entire sub-tree {node_metadata} pruned')
+            node.body = self.get_expr_node_pruned(node.parent)
+            processed_while.append(self.get_expr_node_pruned(node.parent))            
+        else:
+            if (isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not)): #unary boolean                
+                node.test = self.get_not_test(node.test.operand)
+        processed_while.append(node)        
+        
+        if node.orelse: #Remove the keyword 'else' if it exists (in a while-else construct)
+            processed_while.append(node.orelse)        
+            node.orelse = []            
+        return processed_while    
+        
+    def get_not_test(self, test: ast.AST) -> ast.Compare:
+        '''
+        Returns an ast.Compare node replacing the keyword 'not' in an if/while test
+        e.g.  'not (a)' becomes 'False==bool(a)'
+        '''  
+        node_name = self.get_Name('bool', ast.Load())
+        node_call = self.get_Call(node_name, [test])
+        node_compare = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
+        return node_compare
 
     def get_Assign(self, assign_targets: list, assign_value: ast.AST) -> ast.Assign:
         '''
@@ -654,11 +693,8 @@ class Transformer(Parentage):
                 # node_If_list.append(node_if)        
             else:
                 new_Ifs: list = self.get_Ifs_AndOr(node_if_test.operand, if_block_var_id)        
-                last_if: ast.If = new_Ifs[-1] 
-                node_name = self.get_Name('bool', ast.Load())
-                node_call = self.get_Call(node_name, [last_if.test])
-                node_ifnot_test = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
-                last_if.test = node_ifnot_test
+                last_if: ast.If = new_Ifs[-1]                
+                last_if.test = self.get_not_test(last_if.test)
                 node_If_list.append(last_if)
         else:            
             node_if = self.get_control_node(ast.If, test=node_if_test)
@@ -853,6 +889,16 @@ for i in range(2):
     for j in range(2):
         if 'x' not in 'i love python':
             print (f'[{i},{j}]') 
+
+if not (a):
+    print ('a is blank')  
+
+counter = 0
+while not(counter >= 3 and counter <= 7):
+    print(counter)
+    counter += 1
+else:    
+    print('while-else test executed')
 '''
 def main():   
     '''

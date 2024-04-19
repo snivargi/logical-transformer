@@ -69,3 +69,10 @@ while True:
             break
         if _isItemInIter('x', 'i love python', False):
             print(f'[{i},{j}]')
+if False == bool(a):
+    print('a is blank')
+counter = 0
+while False == bool(counter >= 3 and counter <= 7):
+    print(counter)
+    counter += 1
+print('while-else test executed')
