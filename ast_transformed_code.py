@@ -75,4 +75,4 @@ counter = 0
 while False == bool(counter >= 3 and counter <= 7):
     print(counter)
     counter += 1
-print('while-else test executed')
+print(_isItemInIter(a, 'i love python', True))

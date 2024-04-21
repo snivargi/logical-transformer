@@ -92,6 +92,17 @@ def _isItemInIter(item, collection, check = True):
         if_w_replaced_in = self.replace_in_if(node)
         return if_w_replaced_in
     
+    def visit_Call(self, node: ast.Call) -> Any:
+        '''
+        Visits a 'Call' node and its children to try to replace keyword 'in' in them
+        '''   
+        super().generic_visit(node)
+        iter_lines = self.get_iter_code_from_test(node.args[0]) if node.args else None
+        if iter_lines:                    
+            node.args[0] = iter_lines[0].value                                 
+            self.is_iter_func_reqd = True #We need to insert a function that does the if-in check without using in        
+        return node
+
     def visit_For(self, node: ast.For) -> list:
         '''
         Visits a 'for' node and its children to try to replace keyword 'in' in them
@@ -264,6 +275,12 @@ class Transformer(Parentage):
             print (f'Entire Module pruned')
             node.body.append(self.get_expr_node_pruned(None)) 
         return node    
+    
+    def is_bool_node(self, node: ast.AST) -> bool:
+        '''
+        Returns if a node is a boolean expression - BoolOp (and/or) or UnaryOp (not) 
+        '''
+        return isinstance(node, ast.BoolOp) or (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not))
 
     def visit_Call(self, node: ast.Call) -> ast.Call:
         '''
@@ -274,7 +291,7 @@ class Transformer(Parentage):
         
         If eval fails, it returns the original node
         ''' 
-        if self.mode in (self.EXPAND, self.COLLAPSE) and len(node.args): #Only do this if we're trying to replace and/or/not/in    
+        if node.args and self.is_bool_node(node.args[0]) and self.mode in (self.EXPAND, self.COLLAPSE) or self.short_circuiting: #Only do this if we're trying to replace and/or/not/in    
             try:            
                 val = self.get_node_val(node.args[0])                   
                 if Transformer.isprimitive(val):
@@ -355,7 +372,7 @@ class Transformer(Parentage):
         processed_while.append(node)        
         
         if node.orelse: #Remove the keyword 'else' if it exists (in a while-else construct)
-            processed_while.append(node.orelse)        
+            processed_while.extend(node.orelse)        
             node.orelse = []            
         return processed_while    
         
@@ -768,7 +785,6 @@ class Transformer(Parentage):
         if node.test:
             if (isinstance(node.test, ast.BoolOp) or isinstance(node.test, ast.UnaryOp)) or node.orelse:        
                 split = True #We will only split if the test has one of: and/or/not/elif/else
-                
             
             if self.is_valid_body(node.body):
                 #Process if.test and merge if.body               
@@ -898,7 +914,8 @@ while not(counter >= 3 and counter <= 7):
     print(counter)
     counter += 1
 else:    
-    print('while-else test executed')
+    print(a in 'i love python')
+
 '''
 def main():   
     '''
@@ -909,37 +926,39 @@ def main():
         tree = ast.parse(code1)
         new_tree = None #variable to store transformed AST
         print(ast.dump(tree, indent='   '))
-
-
-        #VISIT and TRANSFORM the AST    
-        
-        #Replace keywords 'else/elif/not/and/or in the code
-        #new_tree = Transformer().visit(tree) 
-        new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
-        #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
-    
-        #Replace keyword 'in' in the new AST
-        new_tree = TransformerIn().visit(new_tree) if new_tree else TransformerIn().visit(tree)
-    
-        #Add missing location info to the new nodes and display the new AST
-        new_tree = ast.fix_missing_locations(new_tree)
-        print(ast.dump(new_tree, indent='   '))
-
-        #UNPARSE the transformed AST and VIEW new code 
-        new_code = ast.unparse(new_tree)
-        print(new_code)
-
-        #WRITE new code to file
-        with open('ast_transformed_code.py', 'w') as f:
-                f.write(new_code)  
-
-        #COMPILE the new AST into a binary object        
-        # code_object = compile(new_tree, '', 'exec')
-
-        #EXECUTE the code in the binary object        
-        # exec(code_object)
     except Exception as e:
-        print (f'{type(e).__name__} occurred during AST transformation: {e}')
+        print (f'{type(e).__name__} while parsing code into AST: {e}')
+
+#try:
+    #VISIT and TRANSFORM the AST    
+    
+    #Replace keywords 'else/elif/not/and/or in the code
+    #new_tree = Transformer().visit(tree) 
+    new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
+    #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
+
+    #Replace keyword 'in' in the new AST
+    new_tree = TransformerIn().visit(new_tree) if new_tree else TransformerIn().visit(tree)
+
+    #Add missing location info to the new nodes and display the new AST
+    new_tree = ast.fix_missing_locations(new_tree)
+    print(ast.dump(new_tree, indent='   '))
+
+    #UNPARSE the transformed AST and VIEW new code 
+    new_code = ast.unparse(new_tree)
+    print(new_code)
+
+    #WRITE new code to file
+    with open('ast_transformed_code.py', 'w') as f:
+            f.write(new_code)  
+
+    #COMPILE the new AST into a binary object        
+    # code_object = compile(new_tree, '', 'exec')
+
+    #EXECUTE the code in the binary object        
+    # exec(code_object)
+# except Exception as e:
+#     print (f'{type(e).__name__} occurred during AST transformation: {e}')
     
             
 if __name__ == '__main__':    
