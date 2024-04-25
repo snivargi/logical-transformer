@@ -80,7 +80,7 @@ def _isItemInIter(item, collection, check = True):
         '''      
         super().generic_visit(node)
         if self.is_iter_func_reqd:            
-            iter_func: list = ast.parse(self.ITERATION_IF_CODE).body #Add function def           
+            iter_func: ast.FunctionDef = ast.parse(self.ITERATION_IF_CODE).body[0] #Add function def           
             node.body.insert(self.get_loc_iter(node.body), iter_func)
         return node    
     
@@ -243,6 +243,7 @@ class Transformer(Parentage):
     EXPAND = 'E'
     COLLAPSE = 'C'
     tmp_bool_access = {} #Dictionary to track if the temp variable (for every 'if' block) has been accessed    
+    instance_cnt = 0
     def __init__(self, mode = EXPAND, short_circuiting_flag = True) -> None:
         '''
         Constructor for this transformer takes 2 optional arguments
@@ -252,6 +253,7 @@ class Transformer(Parentage):
         self.mode = mode
         self.short_circuiting = short_circuiting_flag         
         self.dict_node_shortcct = {} #Dictionary to hold short-citcuit status of each if-test node    
+        Transformer.instance_cnt += 1
         super().__init__()
 
     def generic_visit(self, node: ast.AST) -> ast.AST:
@@ -276,12 +278,64 @@ class Transformer(Parentage):
             node.body.append(self.get_expr_node_pruned(None)) 
         return node    
     
-    def is_bool_node(self, node: ast.AST) -> bool:
+    def visit_If(self, node: ast.If) -> Any:
         '''
-        Returns if a node is a boolean expression - BoolOp (and/or) or UnaryOp (not) 
+        Transforms an 'if' node (along with its children) encountered while traversing an AST
+        ''' 
+        processed_if = []
+        node_metadata = self.get_node_metadata(node)   
+        print(f'entering {node_metadata}')  
+        
+        p = node.parent #Get the parent of the current If node
+        gp = p.parent #Get the grandparent of the current If node
+        
+        super().generic_visit(node)
+        if self.mode == self.EXPAND:            
+            processed_if = self.expand_if (node) #Break down this If node into its logical components
+            if not processed_if:
+                print (f'Entire sub-tree {node_metadata} pruned')
+                processed_if.append(self.get_expr_node_pruned(p))
+            return  processed_if    
+        elif self.mode == self.COLLAPSE:
+            processed_if = self.collapse_if(node) #Roll up nested Ifs into a single ast.BoolOp[op=ast.And]            
+            if not processed_if:
+                print (f'Entire sub-tree {node_metadata} pruned')
+                processed_if.append(self.get_expr_node_pruned(p))
+            return  processed_if    
+        else:               
+            return node
+        
+    def visit_While(self, node: ast.While) -> list:
         '''
-        return isinstance(node, ast.BoolOp) or (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not))
+        Transforms a 'while' node (along with its children) encountered while traversing an AST         
+        ''' 
+        processed_while = []
+        node_metadata = self.get_node_metadata(node)
+        print(f'entering {node_metadata}')  
+        super().generic_visit(node)
+        if not (self.is_valid_body(node.body)):           
+            print (f'Entire sub-tree {node_metadata} pruned')
+            node.body = self.get_expr_node_pruned(node.parent)
+            processed_while.append(self.get_expr_node_pruned(node.parent))            
+        else:
+            if self.mode == self.EXPAND and self.is_bool_node(node.test): #The test is a boolean expression, so we need to replace and/or/not
+                funcdef_id =  node.col_offset #A unique id for the function node              
+                node_funcdef = self.replace_while_test(node.test, funcdef_id) #Wrap the test in a function                   
+                processed_while.append(node_funcdef)#Add the function in our return list
+                node_name = self.get_Name(f'_whileTest{funcdef_id}', ast.Load()) #Get a Name node fot the value returned by the function
+                node_call = self.get_Call(node_name, []) #Call the function to check if the while loop should be executed
+                node.test = node_call #The test is now replaced by the function call
 
+            #Commented code below will only replace 'not' with 'False==' in a while test                   
+            # if (isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not)): #unary boolean                
+            #     node.test = self.get_not_test(node.test.operand)
+        processed_while.append(node)        
+        
+        if node.orelse and self.mode == self.EXPAND: #Remove the keyword 'else' if it exists (in a while-else construct)
+            processed_while.extend(node.orelse)        
+            node.orelse = []            
+        return processed_while    
+    
     def visit_Call(self, node: ast.Call) -> ast.Call:
         '''
         Transforms a 'call' node encountered while traversing an AST
@@ -305,86 +359,42 @@ class Transformer(Parentage):
         else:
             super().generic_visit(node)
             return node
-        
-    def get_expr_node_pruned(self, parent: ast.AST) -> ast.Expr:
-        '''
-        Returns an ast.Expr node to replace a pruned node
-        ''' 
-        node_name = self.get_Name('print', ast.Load())
-        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])
-        node_expr = self.get_Expr(node_call)
-        node_expr.parent = parent
-        return node_expr
-
-    def visit_If(self, node: ast.If) -> Any:
-        '''
-        Transforms an 'if' node (along with its children) encountered while traversing an AST
-        ''' 
-        processed_if = []
-        node_metadata = self.get_node_metadata(node)   
-        print(f'entering {node_metadata}')  
-        
-        p = node.parent #Get the parent of the current If node
-        gp = p.parent #Get the grandparent of the current If node
-        
-        super().generic_visit(node)
-        if self.mode == self.EXPAND:            
-            processed_if = self.expand_if (node) #Break down this If node into its logical components
-            if not processed_if:
-                print (f'Entire sub-tree {node_metadata} pruned')
-                processed_if.append(self.get_expr_node_pruned(p))
-            return  processed_if    
-        elif self.mode == self.COLLAPSE:
-            processed_if = self.collapse_if(node) #Roll up nested Ifs into a single ast.BoolOp (op=ast.And)            
-            if not processed_if:
-                print (f'Entire sub-tree {node_metadata} pruned')
-                processed_if.append(self.get_expr_node_pruned(p))
-            return  processed_if    
-        else:               
-            return node
-        
-    def get_node_metadata(self, node: ast.AST) -> str:
-        '''
-        Returns info about a node such as lineno, col_offset, parent node
-        ''' 
-        try:        
-            line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
-        except Exception:
-            line_info = ''        
-        node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
-        return node_metadata
     
-    def visit_While(self, node: ast.While) -> list:
+    def get_Module(self, module_body: list) -> ast.Module:
         '''
-        Transforms a 'while' node (along with its children) encountered while traversing an AST         
-        ''' 
-        processed_while = []
-        node_metadata = self.get_node_metadata(node)
-        print(f'entering {node_metadata}')  
-        super().generic_visit(node)
-        if not (self.is_valid_body(node.body)):           
-            print (f'Entire sub-tree {node_metadata} pruned')
-            node.body = self.get_expr_node_pruned(node.parent)
-            processed_while.append(self.get_expr_node_pruned(node.parent))            
-        else:
-            if (isinstance(node.test, ast.UnaryOp) and isinstance(node.test.op, ast.Not)): #unary boolean                
-                node.test = self.get_not_test(node.test.operand)
-        processed_while.append(node)        
-        
-        if node.orelse: #Remove the keyword 'else' if it exists (in a while-else construct)
-            processed_while.extend(node.orelse)        
-            node.orelse = []            
-        return processed_while    
-        
-    def get_not_test(self, test: ast.AST) -> ast.Compare:
+        Returns an ast.Module node constructed using the specified parameters        
+        '''         
+        node_Module = ast.Module(
+            body = module_body
+        )
+        return node_Module
+
+    def get_Arguments(
+                        self, arg_posonlyargs = [], arg_args = [], 
+                        arg_kwonlyargs = [], arg_defaults = [] 
+                    ) -> ast.arguments:
         '''
-        Returns an ast.Compare node replacing the keyword 'not' in an if/while test
-        e.g.  'not (a)' becomes 'False==bool(a)'
-        '''  
-        node_name = self.get_Name('bool', ast.Load())
-        node_call = self.get_Call(node_name, [test])
-        node_compare = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
-        return node_compare
+        Returns an ast.arguments node constructed using the specified parameters        
+        '''         
+        node_arguments = ast.arguments(
+            posonlyargs = arg_posonlyargs,
+            args = arg_args,
+            kwonlyargs = arg_kwonlyargs,
+            defaults = arg_defaults
+        )
+        return node_arguments
+    
+    def get_FunctionDef(self, funcDef_name: str, funcDef_body: list) -> ast.FunctionDef:
+        '''
+        Returns a basic FunctionDef node constructed using the specified parameters        
+        '''         
+        node_FuncionDef = ast.FunctionDef(
+            name = funcDef_name,
+            args = self.get_Arguments(),
+            body = funcDef_body,
+            decorator_list = []
+        )
+        return node_FuncionDef
 
     def get_Assign(self, assign_targets: list, assign_value: ast.AST) -> ast.Assign:
         '''
@@ -503,6 +513,61 @@ class Transformer(Parentage):
         )
         return node_UnaryOp
     
+    def is_bool_node(self, node: ast.AST) -> bool:
+        '''
+        Returns if a node is a boolean expression - BoolOp (and/or) or UnaryOp (not) 
+        '''
+        return isinstance(node, ast.BoolOp) or (isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not))    
+        
+    def get_expr_node_pruned(self, parent: ast.AST) -> ast.Expr:
+        '''
+        Returns an ast.Expr node to replace a pruned node
+        ''' 
+        node_name = self.get_Name('print', ast.Load())
+        node_call = self.get_Call(node_name, [ast.Constant(value = '<Node pruned>')])
+        node_expr = self.get_Expr(node_call)
+        node_expr.parent = parent
+        return node_expr    
+        
+    def get_node_metadata(self, node: ast.AST) -> str:
+        '''
+        Returns info about a node such as lineno, col_offset, parent node
+        ''' 
+        try:        
+            line_info =  f' at line: {node.lineno}, offset: {node.col_offset}'
+        except Exception:
+            line_info = ''        
+        node_metadata = f'{node.__class__.__name__}(parent: {node.parent.__class__.__name__}){line_info}'        
+        return node_metadata
+    
+    def replace_while_test(self, node_test: ast.AST, funcdef_id: int = 0) -> ast.FunctionDef:
+        '''
+        Takes in an ast.While.test node and wraps that into a FunctionDef node.
+        This is to effectively replace the boolean keywords not/and/or within the test (this is the purpose of our transformer)
+        
+        e.g. The statement 'while a and b:' where 'a and b' is the test, becomes-         
+        def _whileTest0():
+            if a:
+                if b:
+                    return True
+        ''' 
+        node_if = self.get_If(node_test, [ast.Return(ast.Constant(value=True))])       
+        node_if_module: ast.Module = self.get_Module([node_if])         
+        node_if_module = ast.fix_missing_locations(node_if_module)
+        xformed_node_if: ast.Module = Transformer(mode='E').visit(node_if_module)       
+        node_funcdef = self.get_FunctionDef(f'_whileTest{funcdef_id}',xformed_node_if.body)                
+        return node_funcdef      
+        
+    def get_not_test(self, test: ast.AST) -> ast.Compare:
+        '''
+        Returns an ast.Compare node replacing the keyword 'not' in an if/while test
+        e.g.  'not (a)' becomes 'False==bool(a)'
+        '''  
+        node_name = self.get_Name('bool', ast.Load())
+        node_call = self.get_Call(node_name, [test])
+        node_compare = self.get_Compare(ast.Constant(value = False), [ast.Eq()], [node_call])
+        return node_compare
+    
     def merge_Not(self, lroper: list, if_block_var_id: str) -> list:  
         '''
         Wrap an operand within the  NOT operator
@@ -529,7 +594,6 @@ class Transformer(Parentage):
         processed_list =self.merge_And(lroper, [node_assign])  
         processed_list = self.merge_Or(processed_list, [], if_block_var_id) #Add provision to execute where condition is False (i.e. not True)                                    
         return processed_list 
-
 
     def merge_And(self, loper: list, roper: list) -> list:
         '''
@@ -611,8 +675,7 @@ class Transformer(Parentage):
         expr = ast.Expression(body=node)
         ast.fix_missing_locations(expr)
         val = eval(compile(expr, filename='', mode='eval'))
-        return val
-    
+        return val    
     
     def is_short_circuited(self, node_if_test: ast.AST) -> bool:
         '''
@@ -682,8 +745,6 @@ class Transformer(Parentage):
                 reduced_if_test = node_if_test
 
         return reduced_if_test
-
-
 
     def get_Ifs_AndOr(self, node_if_test: ast.AST, if_block_var_id: str) -> list:
         '''
@@ -775,7 +836,7 @@ class Transformer(Parentage):
         '''
         processed_if = []
         split = False 
-        if_block_var_id = f'_boolIf{node.col_offset}'
+        if_block_var_id = f'_boolIf{self.instance_cnt}_{node.col_offset}'
         self.tmp_bool_access[if_block_var_id] = False  
 
         if self.short_circuiting:
@@ -807,8 +868,7 @@ class Transformer(Parentage):
             clean_if = unaccessedRemover.visit(processed_if[0])
             processed_if = [clean_if]
         
-        return processed_if
-    
+        return processed_if    
    
     def collapse_if(self, node: ast.If) -> list:
         '''
@@ -936,6 +996,9 @@ def main():
     #new_tree = Transformer().visit(tree) 
     new_tree = Transformer(mode='E', short_circuiting_flag = True).visit(tree) 
     #new_tree = Transformer(mode='C', short_circuiting_flag = True).visit(tree) 
+    
+    #Add missing location info to the new nodes
+    #new_tree = ast.fix_missing_locations(new_tree)
 
     #Replace keyword 'in' in the new AST
     new_tree = TransformerIn().visit(new_tree) if new_tree else TransformerIn().visit(tree)

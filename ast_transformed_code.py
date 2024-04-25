@@ -24,27 +24,27 @@ def _isItemInIter(item, collection, check=True):
             pass
     return found if check else not found
 a = b = c = ''
-_boolIf0 = False
+_boolIf1_0 = False
 if a:
     if c:
-        _boolIf0 = True
-if _boolIf0 is False:
+        _boolIf1_0 = True
+if _boolIf1_0 is False:
     if b:
         if c:
-            _boolIf0 = True
-if _boolIf0 is False:
-    _boolIf0 = True
+            _boolIf1_0 = True
+if _boolIf1_0 is False:
+    _boolIf1_0 = True
     print('Not test passed')
-if _boolIf0 is False:
+if _boolIf1_0 is False:
     print('Not test failed')
-_boolIf0 = False
+_boolIf1_0 = False
 if 'False':
-    _boolIf0 = True
+    _boolIf1_0 = True
     print(True)
     if isinstance(a, str):
         if 1:
             print('Inner if test executed')
-if _boolIf0 is False:
+if _boolIf1_0 is False:
     print(False)
 print(True)
 print('<Node pruned>')
@@ -72,7 +72,16 @@ while True:
 if False == bool(a):
     print('a is blank')
 counter = 0
-while False == bool(counter >= 3 and counter <= 7):
+
+def _whileTest0():
+    _boolIf2_0 = False
+    if counter >= 3:
+        if counter <= 7:
+            _boolIf2_0 = True
+    if _boolIf2_0 is False:
+        _boolIf2_0 = True
+        return True
+while _whileTest0():
     print(counter)
     counter += 1
 print(_isItemInIter(a, 'i love python', True))
